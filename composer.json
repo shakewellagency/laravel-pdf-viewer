@@ -12,16 +12,16 @@
     ],
     "require": {
         "php": "^8.2",
-        "illuminate/support": "^11.0",
-        "illuminate/database": "^11.0",
-        "illuminate/queue": "^11.0",
-        "illuminate/cache": "^11.0",
+        "illuminate/support": "^11.0|^12.0",
+        "illuminate/database": "^11.0|^12.0",
+        "illuminate/queue": "^11.0|^12.0",
+        "illuminate/cache": "^11.0|^12.0",
         "spatie/pdf-to-text": "^1.52",
         "intervention/image": "^3.0"
     },
     "require-dev": {
-        "orchestra/testbench": "^9.0",
-        "phpunit/phpunit": "^10.0",
+        "orchestra/testbench": "^9.0|^10.0",
+        "phpunit/phpunit": "^10.0|^11.0",
         "mockery/mockery": "^1.6"
     },
     "autoload": {
