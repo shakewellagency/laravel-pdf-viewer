@@ -1,0 +1,835 @@
+{
+  "info": {
+    "name": "Laravel PDF Viewer Package API",
+    "description": "Comprehensive API collection for the Laravel PDF Viewer Package - handles massive PDFs with page-by-page processing, full-text search, and parallel job processing.",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api/pdf-viewer",
+      "type": "string",
+      "description": "Base URL for the PDF Viewer API"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string",
+      "description": "Bearer token for authentication"
+    },
+    {
+      "key": "document_hash",
+      "value": "",
+      "type": "string",
+      "description": "Document hash for testing - will be set by upload request"
+    }
+  ],
+  "item": [
+    {
+      "name": "Document Management",
+      "description": "All document-related operations including upload, retrieval, update, and deletion",
+      "item": [
+        {
+          "name": "Upload PDF Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Response has required fields', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('hash');",
+                  "    pm.expect(jsonData.data).to.have.property('title');",
+                  "    pm.expect(jsonData.data).to.have.property('status');",
+                  "});",
+                  "",
+                  "pm.test('Set document hash for subsequent requests', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('document_hash', jsonData.data.hash);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "PDF file to upload"
+                },
+                {
+                  "key": "title",
+                  "value": "Aviation Safety Manual",
+                  "type": "text",
+                  "description": "Document title (optional - will be derived from filename if not provided)"
+                },
+                {
+                  "key": "description",
+                  "value": "Comprehensive aviation safety procedures and protocols",
+                  "type": "text",
+                  "description": "Document description (optional)"
+                },
+                {
+                  "key": "metadata[author]",
+                  "value": "Aviation Authority",
+                  "type": "text",
+                  "description": "Document metadata - author"
+                },
+                {
+                  "key": "metadata[subject]",
+                  "value": "Safety Procedures",
+                  "type": "text",
+                  "description": "Document metadata - subject"
+                },
+                {
+                  "key": "metadata[keywords]",
+                  "value": "aviation, safety, procedures, emergency",
+                  "type": "text",
+                  "description": "Document metadata - keywords"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/documents",
+              "host": ["{{base_url}}"],
+              "path": ["documents"]
+            },
+            "description": "Upload a PDF document for processing. The document will be processed asynchronously using parallel jobs for each page."
+          }
+        },
+        {
+          "name": "List Documents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has pagination structure', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData).to.have.property('meta');",
+                  "    pm.expect(jsonData.meta).to.have.property('total');",
+                  "    pm.expect(jsonData.meta).to.have.property('per_page');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents?page=1&per_page=10&status=completed&search=aviation",
+              "host": ["{{base_url}}"],
+              "path": ["documents"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number for pagination"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10",
+                  "description": "Number of items per page (max 100)"
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "Filter by document status: uploaded, processing, completed, failed"
+                },
+                {
+                  "key": "search",
+                  "value": "aviation",
+                  "description": "Search term for title/description"
+                }
+              ]
+            },
+            "description": "Retrieve a paginated list of documents with optional filtering by status and search terms."
+          }
+        },
+        {
+          "name": "Get Document Metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has document data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('hash');",
+                  "    pm.expect(jsonData.data).to.have.property('title');",
+                  "    pm.expect(jsonData.data).to.have.property('status');",
+                  "    pm.expect(jsonData.data).to.have.property('page_count');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}"]
+            },
+            "description": "Retrieve metadata for a specific document using its hash."
+          }
+        },
+        {
+          "name": "Update Document Metadata",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Document updated successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated Aviation Safety Manual\",\n  \"description\": \"Updated comprehensive aviation safety procedures and protocols\",\n  \"metadata\": {\n    \"author\": \"Updated Aviation Authority\",\n    \"subject\": \"Updated Safety Procedures\",\n    \"version\": \"2.0\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}"]
+            },
+            "description": "Update metadata for a specific document. This will invalidate related caches."
+          }
+        },
+        {
+          "name": "Get Processing Progress",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has progress data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('status');",
+                  "    pm.expect(jsonData.data).to.have.property('progress_percentage');",
+                  "    pm.expect(jsonData.data).to.have.property('total_pages');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/progress",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "progress"]
+            },
+            "description": "Get processing progress for a document including completion percentage and page status breakdown."
+          }
+        },
+        {
+          "name": "Delete Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Document deleted successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}"]
+            },
+            "description": "Soft delete a document. This will mark the document as deleted and clean up associated files and caches."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Page Management",
+      "description": "Operations for retrieving individual pages and their content",
+      "item": [
+        {
+          "name": "List Document Pages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has page data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData).to.have.property('meta');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/pages?page=1&per_page=20&status=completed",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "pages"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number for pagination"
+                },
+                {
+                  "key": "per_page",
+                  "value": "20",
+                  "description": "Number of pages per response"
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "Filter by page status: pending, processing, completed, failed"
+                }
+              ]
+            },
+            "description": "Get a paginated list of pages for a specific document with optional status filtering."
+          }
+        },
+        {
+          "name": "Get Specific Page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has page content', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('page_number');",
+                  "    pm.expect(jsonData.data).to.have.property('content');",
+                  "    pm.expect(jsonData.data).to.have.property('word_count');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/pages/1",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "pages", "1"]
+            },
+            "description": "Retrieve content and metadata for a specific page number within a document."
+          }
+        },
+        {
+          "name": "Get Page Thumbnail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an image', function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('image/');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "image/jpeg,image/png,*/*"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/pages/1/thumbnail",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "pages", "1", "thumbnail"]
+            },
+            "description": "Retrieve the thumbnail image for a specific page. Returns JPEG image data."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "description": "Full-text search operations for documents and pages",
+      "item": [
+        {
+          "name": "Search Documents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has search results', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData).to.have.property('meta');",
+                  "    pm.expect(jsonData.meta).to.have.property('total');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/documents?q=aviation safety&status=completed&date_from=2024-01-01&date_to=2024-12-31&per_page=10&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["search", "documents"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "aviation safety",
+                  "description": "Search query (required)"
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "Filter by document status"
+                },
+                {
+                  "key": "date_from",
+                  "value": "2024-01-01",
+                  "description": "Filter documents created from this date (Y-m-d format)"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2024-12-31",
+                  "description": "Filter documents created until this date (Y-m-d format)"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10",
+                  "description": "Number of results per page"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number"
+                }
+              ]
+            },
+            "description": "Search documents using full-text search with relevance scoring and filtering options."
+          }
+        },
+        {
+          "name": "Search Pages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has page search results', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    if (jsonData.data.length > 0) {",
+                  "        pm.expect(jsonData.data[0]).to.have.property('page_number');",
+                  "        pm.expect(jsonData.data[0]).to.have.property('search_snippet');",
+                  "        pm.expect(jsonData.data[0]).to.have.property('document');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/pages?q=emergency procedures&highlight=true&include_full_content=false&per_page=10&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["search", "pages"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "emergency procedures",
+                  "description": "Search query (required)"
+                },
+                {
+                  "key": "highlight",
+                  "value": "true",
+                  "description": "Include highlighted content in results"
+                },
+                {
+                  "key": "include_full_content",
+                  "value": "false",
+                  "description": "Include full page content (use sparingly for performance)"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10",
+                  "description": "Number of results per page"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number"
+                }
+              ]
+            },
+            "description": "Search within page content using full-text search with highlighted snippets and relevance scoring."
+          }
+        },
+        {
+          "name": "Get Search Suggestions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has suggestions', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('suggestions');",
+                  "    pm.expect(jsonData.suggestions).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/suggestions?q=aviat&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["search", "suggestions"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "aviat",
+                  "description": "Partial search term for autocomplete (required)"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Maximum number of suggestions to return"
+                }
+              ]
+            },
+            "description": "Get search suggestions for autocomplete functionality based on indexed content and popular searches."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Error Scenarios",
+      "description": "Test various error scenarios and validation responses",
+      "item": [
+        {
+          "name": "Upload Invalid File Type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 422', function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "",
+                  "pm.test('Response has validation errors', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('errors');",
+                  "    pm.expect(jsonData.errors).to.have.property('file');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Upload a non-PDF file (e.g., .txt, .docx) to test validation"
+                },
+                {
+                  "key": "title",
+                  "value": "Test Document",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/documents",
+              "host": ["{{base_url}}"],
+              "path": ["documents"]
+            },
+            "description": "Test file type validation by uploading a non-PDF file."
+          }
+        },
+        {
+          "name": "Get Nonexistent Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 404', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test('Response has error message', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/nonexistent-hash-12345",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "nonexistent-hash-12345"]
+            },
+            "description": "Test 404 response for nonexistent document hash."
+          }
+        },
+        {
+          "name": "Search Without Query",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 422', function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "",
+                  "pm.test('Response has validation errors', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('errors');",
+                  "    pm.expect(jsonData.errors).to.have.property('q');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/documents",
+              "host": ["{{base_url}}"],
+              "path": ["search", "documents"]
+            },
+            "description": "Test validation for missing search query parameter."
+          }
+        },
+        {
+          "name": "Unauthorized Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 401', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test('Response indicates unauthorized', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents",
+              "host": ["{{base_url}}"],
+              "path": ["documents"]
+            },
+            "description": "Test authentication requirement by making request without auth token."
+          }
+        }
+      ]
+    }
+  ]
+}

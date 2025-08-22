@@ -1,0 +1,46 @@
+{
+    "name": "shakewellagency/laravel-pdf-viewer",
+    "description": "A comprehensive Laravel package for page-by-page PDF processing and viewing with full-text search capabilities",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "pdf", "viewer", "search", "processing"],
+    "authors": [
+        {
+            "name": "Shakewell Agency",
+            "email": "info@shakewellagency.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^11.0",
+        "illuminate/database": "^11.0",
+        "illuminate/queue": "^11.0",
+        "illuminate/cache": "^11.0",
+        "spatie/pdf-to-text": "^1.52",
+        "intervention/image": "^3.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0",
+        "phpunit/phpunit": "^10.0",
+        "mockery/mockery": "^1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Shakewellagency\\LaravelPdfViewer\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Shakewellagency\\LaravelPdfViewer\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Shakewellagency\\LaravelPdfViewer\\Providers\\PdfViewerServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

@@ -1,0 +1,92 @@
+# Dependencies
+/vendor
+/node_modules
+
+# IDE files
+/.idea
+/.vscode
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Laravel specific
+/bootstrap/cache
+/storage/*.key
+/storage/app/public
+/storage/framework/cache
+/storage/framework/sessions
+/storage/framework/testing
+/storage/framework/views
+/storage/logs
+
+# Environment files
+.env
+.env.backup
+.env.production
+
+# PHPUnit
+/.phpunit.cache
+/coverage
+/tests/coverage
+
+# Composer
+composer.phar
+composer.lock
+
+# Package specific
+/storage/pdf-documents
+/storage/thumbnails
+/public/storage
+*.pdf
+*.tmp
+
+# Build files
+/build
+/dist
+
+# Cache
+/cache
+/.cache
+
+# Logs
+*.log
+/logs
+
+# Temporary files
+/tmp
+/temp
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Documentation build
+/docs/_build
+/docs/.doctrees
+
+# Package testing
+/tests/storage
+/tests/temp
+/SamplePDF/*.pdf
+
+# Development tools
+.phpcs-cache
+.php-cs-fixer.cache
+.psalm
+
+# IDE specific
+/.fleet
+/.idea
+/.vscode
