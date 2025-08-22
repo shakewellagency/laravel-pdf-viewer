@@ -2,6 +2,8 @@
 
 A comprehensive Laravel package for handling massive PDF documents with page-by-page processing, full-text search, and parallel job processing capabilities.
 
+> **Latest**: Full Laravel Vapor support with S3 storage and multipart uploads added in v1.1.0!
+
 ## Features
 
 - 📄 **Page-by-page PDF processing** for documents with 9000+ pages
