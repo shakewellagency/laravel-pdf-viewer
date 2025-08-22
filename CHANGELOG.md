@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2025-08-22
+
+### Fixed
+- **Queue Configuration**: Updated job classes to use 'default' queue as fallback instead of custom queue names
+- **Compatibility**: Improved compatibility with standard Laravel queue configurations
+- **Environment Variables**: Maintained override capability for custom queue names via environment variables
+
+## [1.0.1] - 2024-12-XX
+
+### Added
+- **Laravel 12 Support**: Added compatibility for Laravel 12
+
 ## [1.0.0] - 2024-08-22
 
 ### Added
