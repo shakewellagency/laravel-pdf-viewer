@@ -24,7 +24,7 @@ class ExtractPageJob implements ShouldQueue
         public PdfDocument $document,
         public int $pageNumber
     ) {
-        $this->onQueue(config('pdf-viewer.jobs.page_extraction.queue', 'pdf-pages'));
+        $this->onQueue(config('pdf-viewer.jobs.page_extraction.queue', 'default'));
         $this->timeout = config('pdf-viewer.jobs.page_extraction.timeout', 60);
         $this->tries = config('pdf-viewer.jobs.page_extraction.tries', 2);
         $this->retryAfter = config('pdf-viewer.jobs.page_extraction.retry_after', 30);

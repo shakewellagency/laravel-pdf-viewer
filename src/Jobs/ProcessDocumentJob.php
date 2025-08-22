@@ -23,7 +23,7 @@ class ProcessDocumentJob implements ShouldQueue
     public function __construct(
         public PdfDocument $document
     ) {
-        $this->onQueue(config('pdf-viewer.jobs.document_processing.queue', 'pdf-processing'));
+        $this->onQueue(config('pdf-viewer.jobs.document_processing.queue', 'default'));
         $this->timeout = config('pdf-viewer.jobs.document_processing.timeout', 300);
         $this->tries = config('pdf-viewer.jobs.document_processing.tries', 3);
         $this->retryAfter = config('pdf-viewer.jobs.document_processing.retry_after', 60);
