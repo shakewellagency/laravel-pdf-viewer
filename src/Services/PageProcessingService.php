@@ -16,38 +16,16 @@ class PageProcessingService implements PageProcessingServiceInterface
     public function extractPage(PdfDocument $document, int $pageNumber): string
     {
         try {
-            $sourceFile = storage_path('app/' . $document->file_path);
+            $disk = $this->getStorageDisk();
             $pageFileName = "page_{$pageNumber}.pdf";
             $pagePath = config('pdf-viewer.storage.pages_path') . '/' . $document->hash . '/' . $pageFileName;
-            $fullPagePath = storage_path('app/' . $pagePath);
 
-            // Create directory if it doesn't exist
-            $directory = dirname($fullPagePath);
-            if (!is_dir($directory)) {
-                mkdir($directory, 0755, true);
+            // Handle S3/Vapor vs local storage differently
+            if ($this->isS3Disk($disk)) {
+                return $this->extractPageForS3($document, $pageNumber, $pagePath, $disk);
+            } else {
+                return $this->extractPageLocally($document, $pageNumber, $pagePath);
             }
-
-            // Use PDF manipulation tools to extract single page
-            // This is a simplified version - in production you'd use tools like pdftk or ghostscript
-            $command = sprintf(
-                'pdftk "%s" cat %d output "%s" 2>&1',
-                $sourceFile,
-                $pageNumber,
-                $fullPagePath
-            );
-
-            exec($command, $output, $returnCode);
-
-            if ($returnCode !== 0) {
-                // Fallback: copy the entire PDF (not ideal but works for testing)
-                copy($sourceFile, $fullPagePath);
-            }
-
-            if (!file_exists($fullPagePath)) {
-                throw new \Exception("Failed to extract page {$pageNumber}");
-            }
-
-            return $pagePath;
         } catch (\Exception $e) {
             Log::error('Page extraction failed', [
                 'document_hash' => $document->hash,
@@ -58,24 +36,113 @@ class PageProcessingService implements PageProcessingServiceInterface
         }
     }
 
+    /**
+     * Extract page for S3/Vapor environment
+     */
+    protected function extractPageForS3(PdfDocument $document, int $pageNumber, string $pagePath, $disk): string
+    {
+        // Download the PDF from S3 to local temp directory
+        $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+        $sourceFile = $tempDir . '/' . basename($document->file_path);
+        
+        // Download PDF from S3 to temp location
+        $pdfContent = $disk->get($document->file_path);
+        file_put_contents($sourceFile, $pdfContent);
+
+        try {
+            // Extract page locally
+            $tempPageFile = $tempDir . '/page_' . $pageNumber . '_' . uniqid() . '.pdf';
+            
+            // Use PDF manipulation tools to extract single page
+            $command = sprintf(
+                'pdftk "%s" cat %d output "%s" 2>&1',
+                $sourceFile,
+                $pageNumber,
+                $tempPageFile
+            );
+
+            exec($command, $output, $returnCode);
+
+            if ($returnCode !== 0) {
+                // Fallback: copy the entire PDF (not ideal but works for testing)
+                copy($sourceFile, $tempPageFile);
+            }
+
+            if (!file_exists($tempPageFile)) {
+                throw new \Exception("Failed to extract page {$pageNumber}");
+            }
+
+            // Upload the extracted page back to S3
+            $pageContent = file_get_contents($tempPageFile);
+            $disk->put($pagePath, $pageContent);
+
+            // Cleanup temp files
+            if (file_exists($sourceFile)) {
+                unlink($sourceFile);
+            }
+            if (file_exists($tempPageFile)) {
+                unlink($tempPageFile);
+            }
+
+            return $pagePath;
+        } catch (\Exception $e) {
+            // Cleanup temp files on error
+            if (file_exists($sourceFile)) {
+                unlink($sourceFile);
+            }
+            if (isset($tempPageFile) && file_exists($tempPageFile)) {
+                unlink($tempPageFile);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Extract page for local storage
+     */
+    protected function extractPageLocally(PdfDocument $document, int $pageNumber, string $pagePath): string
+    {
+        $sourceFile = storage_path('app/' . $document->file_path);
+        $fullPagePath = storage_path('app/' . $pagePath);
+
+        // Create directory if it doesn't exist
+        $directory = dirname($fullPagePath);
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        // Use PDF manipulation tools to extract single page
+        $command = sprintf(
+            'pdftk "%s" cat %d output "%s" 2>&1',
+            $sourceFile,
+            $pageNumber,
+            $fullPagePath
+        );
+
+        exec($command, $output, $returnCode);
+
+        if ($returnCode !== 0) {
+            // Fallback: copy the entire PDF (not ideal but works for testing)
+            copy($sourceFile, $fullPagePath);
+        }
+
+        if (!file_exists($fullPagePath)) {
+            throw new \Exception("Failed to extract page {$pageNumber}");
+        }
+
+        return $pagePath;
+    }
+
     public function extractText(string $pageFilePath): string
     {
         try {
-            $fullPath = storage_path('app/' . $pageFilePath);
-            
-            if (!file_exists($fullPath)) {
-                throw new \Exception("Page file not found: {$pageFilePath}");
+            $disk = Storage::disk(config('pdf-viewer.storage.disk'));
+
+            if ($this->isS3Disk($disk)) {
+                return $this->extractTextFromS3($pageFilePath, $disk);
+            } else {
+                return $this->extractTextLocally($pageFilePath);
             }
-
-            // Use Spatie PDF to Text to extract content
-            $text = (new Pdf())
-                ->setPdf($fullPath)
-                ->text();
-
-            // Clean up the extracted text
-            $text = $this->cleanExtractedText($text);
-
-            return $text;
         } catch (\Exception $e) {
             Log::error('Text extraction failed', [
                 'page_file_path' => $pageFilePath,
@@ -85,6 +152,65 @@ class PageProcessingService implements PageProcessingServiceInterface
             // Return empty string instead of throwing to allow processing to continue
             return '';
         }
+    }
+
+    /**
+     * Extract text from S3 stored PDF
+     */
+    protected function extractTextFromS3(string $pageFilePath, $disk): string
+    {
+        // Download the page PDF from S3 to temp location
+        $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+        $tempFile = $tempDir . '/text_extract_' . uniqid() . '.pdf';
+
+        try {
+            // Download PDF from S3
+            $pdfContent = $disk->get($pageFilePath);
+            file_put_contents($tempFile, $pdfContent);
+
+            // Extract text using Spatie PDF to Text
+            $text = (new Pdf())
+                ->setPdf($tempFile)
+                ->text();
+
+            // Clean up the extracted text
+            $text = $this->cleanExtractedText($text);
+
+            // Cleanup temp file
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+
+            return $text;
+        } catch (\Exception $e) {
+            // Cleanup temp file on error
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Extract text from locally stored PDF
+     */
+    protected function extractTextLocally(string $pageFilePath): string
+    {
+        $fullPath = storage_path('app/' . $pageFilePath);
+        
+        if (!file_exists($fullPath)) {
+            throw new \Exception("Page file not found: {$pageFilePath}");
+        }
+
+        // Use Spatie PDF to Text to extract content
+        $text = (new Pdf())
+            ->setPdf($fullPath)
+            ->text();
+
+        // Clean up the extracted text
+        $text = $this->cleanExtractedText($text);
+
+        return $text;
     }
 
     public function createPage(PdfDocument $document, int $pageNumber, string $content = ''): PdfDocumentPage
@@ -113,37 +239,54 @@ class PageProcessingService implements PageProcessingServiceInterface
                 return '';
             }
 
-            $fullPagePath = storage_path('app/' . $pageFilePath);
-            
-            if (!file_exists($fullPagePath)) {
-                throw new \Exception("Page file not found: {$pageFilePath}");
+            $disk = Storage::disk(config('pdf-viewer.storage.disk'));
+
+            if ($this->isS3Disk($disk)) {
+                return $this->generateThumbnailForS3($pageFilePath, $width, $height, $disk);
+            } else {
+                return $this->generateThumbnailLocally($pageFilePath, $width, $height);
             }
+        } catch (\Exception $e) {
+            Log::error('Thumbnail generation error', [
+                'page_file_path' => $pageFilePath,
+                'error' => $e->getMessage(),
+            ]);
+            return '';
+        }
+    }
+
+    /**
+     * Generate thumbnail for S3 stored PDF
+     */
+    protected function generateThumbnailForS3(string $pageFilePath, int $width, int $height, $disk): string
+    {
+        $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+        $tempPageFile = $tempDir . '/thumb_source_' . uniqid() . '.pdf';
+        $tempThumbnailFile = $tempDir . '/thumb_' . uniqid() . '.jpg';
+
+        try {
+            // Download PDF from S3
+            $pdfContent = $disk->get($pageFilePath);
+            file_put_contents($tempPageFile, $pdfContent);
 
             // Generate thumbnail filename
             $thumbnailName = pathinfo($pageFilePath, PATHINFO_FILENAME) . '_thumb.jpg';
             $documentHash = basename(dirname($pageFilePath));
             $thumbnailPath = config('pdf-viewer.storage.thumbnails_path') . '/' . $documentHash . '/' . $thumbnailName;
-            $fullThumbnailPath = storage_path('app/' . $thumbnailPath);
-
-            // Create directory if it doesn't exist
-            $directory = dirname($fullThumbnailPath);
-            if (!is_dir($directory)) {
-                mkdir($directory, 0755, true);
-            }
 
             // Convert PDF page to image using ImageMagick
             $command = sprintf(
                 'convert -density 150 "%s[0]" -quality %d -resize %dx%d "%s" 2>&1',
-                $fullPagePath,
+                $tempPageFile,
                 config('pdf-viewer.thumbnails.quality', 80),
                 $width,
                 $height,
-                $fullThumbnailPath
+                $tempThumbnailFile
             );
 
             exec($command, $output, $returnCode);
 
-            if ($returnCode !== 0 || !file_exists($fullThumbnailPath)) {
+            if ($returnCode !== 0 || !file_exists($tempThumbnailFile)) {
                 Log::warning('Thumbnail generation failed', [
                     'page_file_path' => $pageFilePath,
                     'command' => $command,
@@ -152,14 +295,76 @@ class PageProcessingService implements PageProcessingServiceInterface
                 return '';
             }
 
+            // Upload thumbnail to S3
+            $thumbnailContent = file_get_contents($tempThumbnailFile);
+            $disk->put($thumbnailPath, $thumbnailContent, 'public');
+
+            // Cleanup temp files
+            if (file_exists($tempPageFile)) {
+                unlink($tempPageFile);
+            }
+            if (file_exists($tempThumbnailFile)) {
+                unlink($tempThumbnailFile);
+            }
+
             return $thumbnailPath;
         } catch (\Exception $e) {
-            Log::error('Thumbnail generation error', [
+            // Cleanup temp files on error
+            if (file_exists($tempPageFile)) {
+                unlink($tempPageFile);
+            }
+            if (file_exists($tempThumbnailFile)) {
+                unlink($tempThumbnailFile);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Generate thumbnail for locally stored PDF
+     */
+    protected function generateThumbnailLocally(string $pageFilePath, int $width, int $height): string
+    {
+        $fullPagePath = storage_path('app/' . $pageFilePath);
+        
+        if (!file_exists($fullPagePath)) {
+            throw new \Exception("Page file not found: {$pageFilePath}");
+        }
+
+        // Generate thumbnail filename
+        $thumbnailName = pathinfo($pageFilePath, PATHINFO_FILENAME) . '_thumb.jpg';
+        $documentHash = basename(dirname($pageFilePath));
+        $thumbnailPath = config('pdf-viewer.storage.thumbnails_path') . '/' . $documentHash . '/' . $thumbnailName;
+        $fullThumbnailPath = storage_path('app/' . $thumbnailPath);
+
+        // Create directory if it doesn't exist
+        $directory = dirname($fullThumbnailPath);
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        // Convert PDF page to image using ImageMagick
+        $command = sprintf(
+            'convert -density 150 "%s[0]" -quality %d -resize %dx%d "%s" 2>&1',
+            $fullPagePath,
+            config('pdf-viewer.thumbnails.quality', 80),
+            $width,
+            $height,
+            $fullThumbnailPath
+        );
+
+        exec($command, $output, $returnCode);
+
+        if ($returnCode !== 0 || !file_exists($fullThumbnailPath)) {
+            Log::warning('Thumbnail generation failed', [
                 'page_file_path' => $pageFilePath,
-                'error' => $e->getMessage(),
+                'command' => $command,
+                'output' => implode("\n", $output),
             ]);
             return '';
         }
+
+        return $thumbnailPath;
     }
 
     public function getPageFilePath(string $documentHash, int $pageNumber): string
@@ -246,5 +451,45 @@ class PageProcessingService implements PageProcessingServiceInterface
         $text = trim($text);
         
         return $text;
+    }
+
+    /**
+     * Get the configured storage disk with package-specific S3 configuration
+     */
+    protected function getStorageDisk()
+    {
+        $diskName = config('pdf-viewer.storage.disk');
+        
+        // If using S3, create a custom S3 disk with package-specific credentials
+        if ($diskName === 's3') {
+            $awsConfig = config('pdf-viewer.storage.aws');
+            
+            if (!empty($awsConfig['key']) && !empty($awsConfig['secret']) && !empty($awsConfig['bucket'])) {
+                return Storage::build([
+                    'driver' => 's3',
+                    'key' => $awsConfig['key'],
+                    'secret' => $awsConfig['secret'],
+                    'region' => $awsConfig['region'] ?? 'ap-southeast-2',
+                    'bucket' => $awsConfig['bucket'],
+                    'url' => null,
+                    'endpoint' => null,
+                    'use_path_style_endpoint' => $awsConfig['use_path_style_endpoint'] ?? false,
+                    'throw' => false,
+                    'visibility' => 'public',
+                ]);
+            }
+        }
+        
+        // Fall back to configured disk
+        return Storage::disk($diskName);
+    }
+
+    /**
+     * Check if the storage disk is S3
+     */
+    protected function isS3Disk($disk): bool
+    {
+        return method_exists($disk->getAdapter(), 'getBucket') || 
+               (config('pdf-viewer.storage.disk') === 's3');
     }
 }

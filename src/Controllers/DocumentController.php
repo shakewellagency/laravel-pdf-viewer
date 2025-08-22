@@ -377,4 +377,140 @@ class DocumentController extends Controller
             return ['status' => 'unhealthy', 'error' => $e->getMessage()];
         }
     }
+
+    /**
+     * Initiate multipart upload
+     */
+    public function initiateMultipartUpload(\Illuminate\Http\Request $request): JsonResponse
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'original_filename' => 'required|string|max:255',
+            'file_size' => 'required|integer|min:1',
+            'total_parts' => 'required|integer|min:1|max:10000',
+        ]);
+
+        try {
+            $metadata = $request->only(['title', 'original_filename', 'file_size']);
+            $totalParts = $request->input('total_parts');
+
+            // Initiate multipart upload
+            $upload = $this->documentService->initiateMultipartUpload($metadata);
+
+            // Generate signed URLs for all parts
+            $signedUrls = $this->documentService->getMultipartUploadUrls(
+                $upload['document_hash'], 
+                $totalParts
+            );
+
+            return response()->json([
+                'message' => 'Multipart upload initiated successfully',
+                'data' => [
+                    'document_hash' => $upload['document_hash'],
+                    'upload_id' => $upload['upload_id'],
+                    'signed_urls' => $signedUrls,
+                    'expires_in' => $upload['expires_in'],
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to initiate multipart upload',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Complete multipart upload
+     */
+    public function completeMultipartUpload(\Illuminate\Http\Request $request, string $documentHash): JsonResponse
+    {
+        $request->validate([
+            'parts' => 'required|array',
+            'parts.*.PartNumber' => 'required|integer|min:1',
+            'parts.*.ETag' => 'required|string',
+        ]);
+
+        try {
+            $parts = $request->input('parts');
+            
+            $success = $this->documentService->completeMultipartUpload($documentHash, $parts);
+
+            if ($success) {
+                $document = $this->documentService->findByHash($documentHash);
+                
+                return response()->json([
+                    'message' => 'Multipart upload completed successfully',
+                    'data' => new DocumentResource($document),
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Failed to complete multipart upload',
+            ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to complete multipart upload',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Abort multipart upload
+     */
+    public function abortMultipartUpload(string $documentHash): JsonResponse
+    {
+        try {
+            $success = $this->documentService->abortMultipartUpload($documentHash);
+
+            if ($success) {
+                return response()->json([
+                    'message' => 'Multipart upload aborted successfully',
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Failed to abort multipart upload',
+            ], 422);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to abort multipart upload',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get additional signed URLs for multipart upload (if needed)
+     */
+    public function getMultipartUrls(\Illuminate\Http\Request $request, string $documentHash): JsonResponse
+    {
+        $request->validate([
+            'total_parts' => 'required|integer|min:1|max:10000',
+        ]);
+
+        try {
+            $totalParts = $request->input('total_parts');
+            
+            $signedUrls = $this->documentService->getMultipartUploadUrls($documentHash, $totalParts);
+
+            return response()->json([
+                'data' => [
+                    'document_hash' => $documentHash,
+                    'signed_urls' => $signedUrls,
+                    'expires_in' => config('pdf-viewer.storage.signed_url_expires', 3600),
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate signed URLs',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+    }
 }

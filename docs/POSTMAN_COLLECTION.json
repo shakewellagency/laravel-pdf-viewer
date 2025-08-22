@@ -1,8 +1,8 @@
 {
   "info": {
     "name": "Laravel PDF Viewer Package API",
-    "description": "Comprehensive API collection for the Laravel PDF Viewer Package - handles massive PDFs with page-by-page processing, full-text search, and parallel job processing.",
-    "version": "1.0.0",
+    "description": "Comprehensive API collection for the Laravel PDF Viewer Package - S3/Vapor compliant with multipart uploads, page-by-page processing, full-text search, and parallel job processing.",
+    "version": "2.0.0",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -33,6 +33,12 @@
       "value": "",
       "type": "string",
       "description": "Document hash for testing - will be set by upload request"
+    },
+    {
+      "key": "upload_id",
+      "value": "",
+      "type": "string", 
+      "description": "S3 multipart upload ID - will be set by multipart initiation request"
     }
   ],
   "item": [
@@ -123,6 +129,186 @@
               "path": ["documents"]
             },
             "description": "Upload a PDF document for processing. The document will be processed asynchronously using parallel jobs for each page."
+          }
+        },
+        {
+          "name": "Initiate Multipart Upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has multipart upload data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('document_hash');",
+                  "    pm.expect(jsonData.data).to.have.property('upload_id');",
+                  "    pm.expect(jsonData.data).to.have.property('signed_urls');",
+                  "    pm.expect(jsonData.data).to.have.property('expires_in');",
+                  "});",
+                  "",
+                  "pm.test('Set document hash for subsequent requests', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('document_hash', jsonData.data.document_hash);",
+                  "    pm.collectionVariables.set('upload_id', jsonData.data.upload_id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Large Aviation Manual\",\n  \"original_filename\": \"large-aviation-manual.pdf\",\n  \"file_size\": 52428800,\n  \"total_parts\": 10\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents/multipart/initiate",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "multipart", "initiate"]
+            },
+            "description": "Initiate multipart upload for large PDF files. Returns signed URLs for direct client-to-S3 upload. Perfect for Laravel Vapor deployment as it bypasses server file handling."
+          }
+        },
+        {
+          "name": "Complete Multipart Upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Upload completed successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('hash');",
+                  "    pm.expect(jsonData.data).to.have.property('status');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parts\": [\n    {\n      \"PartNumber\": 1,\n      \"ETag\": \"\\\"d41d8cd98f00b204e9800998ecf8427e\\\"\"\n    },\n    {\n      \"PartNumber\": 2,\n      \"ETag\": \"\\\"098f6bcd4621d373cade4e832627b4f6\\\"\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/multipart/complete",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "multipart", "complete"]
+            },
+            "description": "Complete multipart upload after all parts have been uploaded to S3. Provide ETags returned from S3 for each part."
+          }
+        },
+        {
+          "name": "Abort Multipart Upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Upload aborted successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/multipart/abort",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "multipart", "abort"]
+            },
+            "description": "Abort multipart upload and clean up S3 resources. Use when upload fails or needs to be cancelled."
+          }
+        },
+        {
+          "name": "Get Additional Multipart URLs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has signed URLs', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('signed_urls');",
+                  "    pm.expect(jsonData.data).to.have.property('expires_in');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"total_parts\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/multipart/urls",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "multipart", "urls"]
+            },
+            "description": "Get additional or refreshed signed URLs for multipart upload if original URLs have expired."
           }
         },
         {
@@ -307,6 +493,129 @@
           }
         },
         {
+          "name": "Process Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Processing started', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"process_pages\": true,\n  \"extract_text\": true,\n  \"generate_thumbnails\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/process",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "process"]
+            },
+            "description": "Manually trigger processing for an uploaded document."
+          }
+        },
+        {
+          "name": "Retry Failed Processing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Retry initiated', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reset_progress\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/retry",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "retry"]
+            },
+            "description": "Retry processing for a failed document."
+          }
+        },
+        {
+          "name": "Cancel Processing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Processing cancelled', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/cancel",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "cancel"]
+            },
+            "description": "Cancel ongoing processing for a document."
+          }
+        },
+        {
           "name": "Delete Document",
           "event": [
             {
@@ -470,6 +779,40 @@
               "path": ["documents", "{{document_hash}}", "pages", "1", "thumbnail"]
             },
             "description": "Retrieve the thumbnail image for a specific page. Returns JPEG image data."
+          }
+        },
+        {
+          "name": "Download Page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is a PDF', function () {",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/pdf');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/pdf,*/*"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/documents/{{document_hash}}/pages/1/download",
+              "host": ["{{base_url}}"],
+              "path": ["documents", "{{document_hash}}", "pages", "1", "download"]
+            },
+            "description": "Download a specific page as a PDF file."
           }
         }
       ]
@@ -660,6 +1003,217 @@
               ]
             },
             "description": "Get search suggestions for autocomplete functionality based on indexed content and popular searches."
+          }
+        },
+        {
+          "name": "Search Within Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has document search results', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData).to.have.property('meta');",
+                  "    if (jsonData.data.length > 0) {",
+                  "        pm.expect(jsonData.data[0]).to.have.property('page_number');",
+                  "        pm.expect(jsonData.data[0]).to.have.property('content');",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/search/documents/{{document_hash}}?q=safety procedures&highlight=true&per_page=10&page=1",
+              "host": ["{{base_url}}"],
+              "path": ["search", "documents", "{{document_hash}}"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "safety procedures",
+                  "description": "Search query (required)"
+                },
+                {
+                  "key": "highlight",
+                  "value": "true",
+                  "description": "Enable search term highlighting"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10",
+                  "description": "Number of results per page"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number"
+                }
+              ]
+            },
+            "description": "Search within a specific document for pages containing the search query."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Utilities",
+      "description": "Cache management, statistics, and system monitoring endpoints",
+      "item": [
+        {
+          "name": "Clear Cache",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Cache cleared successfully', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/utils/cache/clear",
+              "host": ["{{base_url}}"],
+              "path": ["utils", "cache", "clear"]
+            },
+            "description": "Clear all cached PDF viewer data including thumbnails and processed content."
+          }
+        },
+        {
+          "name": "Warm Cache",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Cache warming initiated', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/utils/cache/warm/{{document_hash}}",
+              "host": ["{{base_url}}"],
+              "path": ["utils", "cache", "warm", "{{document_hash}}"]
+            },
+            "description": "Pre-generate and cache thumbnails and processed content for a specific document."
+          }
+        },
+        {
+          "name": "System Statistics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response has statistics data', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('data');",
+                  "    pm.expect(jsonData.data).to.have.property('total_documents');",
+                  "    pm.expect(jsonData.data).to.have.property('total_pages');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/utils/stats",
+              "host": ["{{base_url}}"],
+              "path": ["utils", "stats"]
+            },
+            "description": "Get system statistics including document counts, processing status, and storage usage."
+          }
+        },
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('System is healthy', function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData.status).to.equal('ok');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/utils/health",
+              "host": ["{{base_url}}"],
+              "path": ["utils", "health"]
+            },
+            "description": "Perform system health check including S3 connectivity, database status, and service availability."
           }
         }
       ]

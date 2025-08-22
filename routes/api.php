@@ -24,6 +24,12 @@ Route::prefix('documents')->group(function () {
     Route::patch('/{document_hash}', [DocumentController::class, 'update'])->name('pdf-viewer.documents.update');
     Route::delete('/{document_hash}', [DocumentController::class, 'destroy'])->name('pdf-viewer.documents.destroy');
 
+    // Multipart upload routes
+    Route::post('/multipart/initiate', [DocumentController::class, 'initiateMultipartUpload'])->name('pdf-viewer.documents.multipart.initiate');
+    Route::post('/{document_hash}/multipart/complete', [DocumentController::class, 'completeMultipartUpload'])->name('pdf-viewer.documents.multipart.complete');
+    Route::delete('/{document_hash}/multipart/abort', [DocumentController::class, 'abortMultipartUpload'])->name('pdf-viewer.documents.multipart.abort');
+    Route::post('/{document_hash}/multipart/urls', [DocumentController::class, 'getMultipartUrls'])->name('pdf-viewer.documents.multipart.urls');
+
     // Document processing routes
     Route::post('/{document_hash}/process', [DocumentController::class, 'process'])->name('pdf-viewer.documents.process');
     Route::get('/{document_hash}/progress', [DocumentController::class, 'progress'])->name('pdf-viewer.documents.progress');

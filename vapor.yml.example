@@ -1,0 +1,65 @@
+id: 1
+name: laravel-pdf-viewer
+environments:
+  production:
+    memory: 3008
+    timeout: 900
+    cli-memory: 3008
+    cli-timeout: 900
+    runtime: 'php-8.2'
+    warm: 25
+    variables:
+      # S3 Storage Configuration for PDF Viewer
+      PDF_VIEWER_DISK: s3
+      PDF_VIEWER_PATH: pdf-documents
+      PDF_VIEWER_PAGES_PATH: pdf-pages
+      PDF_VIEWER_THUMBNAILS_PATH: pdf-thumbnails
+      
+      # Vapor-specific settings
+      PDF_VIEWER_VAPOR_ENABLED: true
+      PDF_VIEWER_LAMBDA_TIMEOUT: 900
+      PDF_VIEWER_LAMBDA_MEMORY: 3008
+      PDF_VIEWER_TEMP_DIR: /tmp
+      
+      # S3 settings
+      PDF_VIEWER_SIGNED_URL_EXPIRES: 3600
+      PDF_VIEWER_MULTIPART_THRESHOLD: 52428800
+      PDF_VIEWER_STREAM_READS: true
+      
+      # Processing settings for Lambda
+      PDF_VIEWER_TIMEOUT: 870  # Leave buffer for Lambda
+      PDF_VIEWER_DOCUMENT_TIMEOUT: 270
+      PDF_VIEWER_PAGE_TIMEOUT: 50
+      PDF_VIEWER_TEXT_TIMEOUT: 25
+      
+      # Queue configuration
+      PDF_VIEWER_DOCUMENT_QUEUE: default
+      PDF_VIEWER_PAGE_QUEUE: default  
+      PDF_VIEWER_TEXT_QUEUE: default
+      
+      # Package-specific AWS S3 Configuration (avoids conflicts)
+      PDF_VIEWER_AWS_ACCESS_KEY_ID: ${PDF_VIEWER_AWS_ACCESS_KEY_ID}
+      PDF_VIEWER_AWS_SECRET_ACCESS_KEY: ${PDF_VIEWER_AWS_SECRET_ACCESS_KEY}  
+      PDF_VIEWER_AWS_REGION: ap-southeast-2
+      PDF_VIEWER_AWS_BUCKET: www.shakewell.agency
+      PDF_VIEWER_AWS_USE_PATH_STYLE_ENDPOINT: false
+      
+  staging:
+    memory: 1024
+    timeout: 300
+    cli-memory: 1024  
+    cli-timeout: 300
+    runtime: 'php-8.2'
+    warm: 5
+    variables:
+      PDF_VIEWER_DISK: s3
+      PDF_VIEWER_VAPOR_ENABLED: true
+      PDF_VIEWER_LAMBDA_TIMEOUT: 300
+      PDF_VIEWER_LAMBDA_MEMORY: 1024
+      PDF_VIEWER_TEMP_DIR: /tmp
+      PDF_VIEWER_TIMEOUT: 270
+      
+build:
+  - 'COMPOSER_MIRROR_PATH_REPOS=1 composer install --no-dev --classmap-authoritative'
+  - 'php artisan event:cache'
+  - 'npm ci && npm run build && rm -rf node_modules'

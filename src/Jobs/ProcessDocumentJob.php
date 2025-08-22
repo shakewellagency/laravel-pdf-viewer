@@ -24,7 +24,18 @@ class ProcessDocumentJob implements ShouldQueue
         public PdfDocument $document
     ) {
         $this->onQueue(config('pdf-viewer.jobs.document_processing.queue', 'default'));
-        $this->timeout = config('pdf-viewer.jobs.document_processing.timeout', 300);
+        
+        // Vapor-aware timeout configuration
+        if (config('pdf-viewer.vapor.enabled', false)) {
+            // Respect Vapor Lambda timeout limits (max 15 minutes)
+            $this->timeout = min(
+                config('pdf-viewer.jobs.document_processing.timeout', 300),
+                config('pdf-viewer.vapor.lambda_timeout', 900) - 30 // Leave 30 seconds buffer
+            );
+        } else {
+            $this->timeout = config('pdf-viewer.jobs.document_processing.timeout', 300);
+        }
+        
         $this->tries = config('pdf-viewer.jobs.document_processing.tries', 3);
         $this->retryAfter = config('pdf-viewer.jobs.document_processing.retry_after', 60);
     }

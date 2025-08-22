@@ -24,10 +24,23 @@ return [
     |--------------------------------------------------------------------------
     */
     'storage' => [
-        'disk' => env('PDF_VIEWER_DISK', 'local'),
+        'disk' => env('PDF_VIEWER_DISK', 's3'),
         'path' => env('PDF_VIEWER_PATH', 'pdf-documents'),
         'pages_path' => env('PDF_VIEWER_PAGES_PATH', 'pdf-pages'),
         'thumbnails_path' => env('PDF_VIEWER_THUMBNAILS_PATH', 'pdf-thumbnails'),
+        // Vapor/S3 specific settings
+        'temp_disk' => env('PDF_VIEWER_TEMP_DISK', 'local'),
+        'signed_url_expires' => env('PDF_VIEWER_SIGNED_URL_EXPIRES', 3600), // 1 hour
+        'multipart_threshold' => env('PDF_VIEWER_MULTIPART_THRESHOLD', 52428800), // 50MB
+        'stream_reads' => env('PDF_VIEWER_STREAM_READS', true),
+        // Package-specific AWS credentials to avoid conflicts
+        'aws' => [
+            'key' => env('PDF_VIEWER_AWS_ACCESS_KEY_ID'),
+            'secret' => env('PDF_VIEWER_AWS_SECRET_ACCESS_KEY'),
+            'region' => env('PDF_VIEWER_AWS_REGION', 'ap-southeast-2'),
+            'bucket' => env('PDF_VIEWER_AWS_BUCKET'),
+            'use_path_style_endpoint' => env('PDF_VIEWER_AWS_USE_PATH_STYLE_ENDPOINT', false),
+        ],
     ],
 
     /*
@@ -140,5 +153,19 @@ return [
         'log_search' => env('PDF_VIEWER_LOG_SEARCH', false),
         'log_cache' => env('PDF_VIEWER_LOG_CACHE', false),
         'metrics_enabled' => env('PDF_VIEWER_METRICS_ENABLED', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Laravel Vapor Configuration
+    |--------------------------------------------------------------------------
+    */
+    'vapor' => [
+        'enabled' => env('PDF_VIEWER_VAPOR_ENABLED', false),
+        'lambda_timeout' => env('PDF_VIEWER_LAMBDA_TIMEOUT', 900), // 15 minutes max
+        'lambda_memory' => env('PDF_VIEWER_LAMBDA_MEMORY', 3008), // Max memory for Lambda
+        'temp_directory' => env('PDF_VIEWER_TEMP_DIR', '/tmp'),
+        'chunk_size' => env('PDF_VIEWER_CHUNK_SIZE', 1048576), // 1MB chunks for S3 streaming
+        'concurrent_uploads' => env('PDF_VIEWER_CONCURRENT_UPLOADS', 5),
     ],
 ];

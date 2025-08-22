@@ -50,4 +50,29 @@ interface DocumentServiceInterface
      * Check if document exists
      */
     public function exists(string $documentHash): bool;
+
+    /**
+     * Get a temporary signed URL for S3 files
+     */
+    public function getSignedUrl(string $filePath, ?int $expiresIn = null): string;
+
+    /**
+     * Initiate multipart upload for large files
+     */
+    public function initiateMultipartUpload(array $metadata): array;
+
+    /**
+     * Generate signed URLs for multipart upload parts
+     */
+    public function getMultipartUploadUrls(string $documentHash, int $totalParts): array;
+
+    /**
+     * Complete multipart upload
+     */
+    public function completeMultipartUpload(string $documentHash, array $parts): bool;
+
+    /**
+     * Abort multipart upload
+     */
+    public function abortMultipartUpload(string $documentHash): bool;
 }

@@ -89,7 +89,7 @@ class PageController extends Controller
         ]);
     }
 
-    public function thumbnail(string $documentHash, int $pageNumber): Response
+    public function thumbnail(string $documentHash, int $pageNumber): Response|JsonResponse
     {
         $document = $this->documentService->findByHash($documentHash);
 
@@ -110,6 +110,18 @@ class PageController extends Controller
                 abort(404, 'Thumbnail file not found');
             }
 
+            // For S3/Vapor, return signed URL instead of streaming content
+            if ($this->isS3Disk($disk)) {
+                $signedUrl = $this->documentService->getSignedUrl($page->thumbnail_path, 3600); // 1 hour
+                
+                return response()->json([
+                    'url' => $signedUrl,
+                    'expires_in' => 3600,
+                    'content_type' => 'image/jpeg'
+                ]);
+            }
+
+            // For local storage, stream the content as before
             $content = $disk->get($page->thumbnail_path);
             $mimeType = $disk->mimeType($page->thumbnail_path) ?: 'image/jpeg';
 
@@ -123,7 +135,7 @@ class PageController extends Controller
         }
     }
 
-    public function download(string $documentHash, int $pageNumber): Response
+    public function download(string $documentHash, int $pageNumber): Response|JsonResponse
     {
         $document = $this->documentService->findByHash($documentHash);
 
@@ -144,6 +156,20 @@ class PageController extends Controller
                 abort(404, 'Page file not found');
             }
 
+            // For S3/Vapor, return signed URL instead of streaming content
+            if ($this->isS3Disk($disk)) {
+                $signedUrl = $this->documentService->getSignedUrl($page->page_file_path, 1800); // 30 minutes
+                $filename = $document->title . "_page_{$pageNumber}.pdf";
+                
+                return response()->json([
+                    'url' => $signedUrl,
+                    'expires_in' => 1800,
+                    'content_type' => 'application/pdf',
+                    'filename' => $filename
+                ]);
+            }
+
+            // For local storage, stream the content as before
             $content = $disk->get($page->page_file_path);
             $filename = $document->title . "_page_{$pageNumber}.pdf";
 
@@ -155,5 +181,14 @@ class PageController extends Controller
         } catch (\Exception $e) {
             abort(500, 'Failed to download page');
         }
+    }
+
+    /**
+     * Check if the storage disk is S3
+     */
+    protected function isS3Disk($disk): bool
+    {
+        return method_exists($disk->getAdapter(), 'getBucket') || 
+               (config('pdf-viewer.storage.disk') === 's3');
     }
 }

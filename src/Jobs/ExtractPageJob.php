@@ -25,7 +25,17 @@ class ExtractPageJob implements ShouldQueue
         public int $pageNumber
     ) {
         $this->onQueue(config('pdf-viewer.jobs.page_extraction.queue', 'default'));
-        $this->timeout = config('pdf-viewer.jobs.page_extraction.timeout', 60);
+        
+        // Vapor-aware timeout configuration
+        if (config('pdf-viewer.vapor.enabled', false)) {
+            $this->timeout = min(
+                config('pdf-viewer.jobs.page_extraction.timeout', 60),
+                config('pdf-viewer.vapor.lambda_timeout', 900) - 30 // Leave 30 seconds buffer
+            );
+        } else {
+            $this->timeout = config('pdf-viewer.jobs.page_extraction.timeout', 60);
+        }
+        
         $this->tries = config('pdf-viewer.jobs.page_extraction.tries', 2);
         $this->retryAfter = config('pdf-viewer.jobs.page_extraction.retry_after', 30);
     }

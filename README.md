@@ -12,6 +12,8 @@ A comprehensive Laravel package for handling massive PDF documents with page-by-
 - 🎯 **SOLID design principles** compliance with interface segregation
 - 🧪 **Complete test coverage** with unit and feature tests
 - 🔗 **Mozilla PDF.js integration** ready
+- ☁️ **Laravel Vapor compatible** with S3 storage and serverless deployment
+- 🏗️ **Flexible storage** supporting local, S3, and other Laravel filesystem drivers
 
 ## Requirements
 
@@ -20,6 +22,12 @@ A comprehensive Laravel package for handling massive PDF documents with page-by-
 - MySQL 5.7+ (with FULLTEXT search support)
 - Redis (recommended for caching)
 - Queue driver (Redis/Database recommended)
+
+### For S3/Laravel Vapor Support
+
+- AWS SDK for PHP 3.0+ (automatically installed)
+- League Flysystem S3 adapter 3.0+ (automatically installed)
+- Valid AWS S3 bucket and credentials
 
 ## Installation
 
@@ -40,11 +48,29 @@ php artisan vendor:publish --provider="Shakewellagency\\LaravelPdfViewer\\Provid
 ```
 
 4. **Configure environment variables:**
+
+**For Local Storage:**
 ```env
 # Storage Configuration
 PDF_VIEWER_STORAGE_DISK=local
 PDF_VIEWER_STORAGE_PATH=pdf-documents
+```
 
+**For AWS S3/Laravel Vapor:**
+```env
+# Storage Configuration
+PDF_VIEWER_STORAGE_DISK=s3
+
+# AWS S3 Configuration (Package-specific to avoid conflicts)
+PDF_VIEWER_AWS_ACCESS_KEY_ID=your_access_key
+PDF_VIEWER_AWS_SECRET_ACCESS_KEY=your_secret_key
+PDF_VIEWER_AWS_REGION=ap-southeast-2
+PDF_VIEWER_AWS_BUCKET=your-bucket-name
+PDF_VIEWER_AWS_USE_PATH_STYLE_ENDPOINT=false
+```
+
+**Common Processing Configuration:**
+```env
 # Processing Configuration
 PDF_VIEWER_MAX_FILE_SIZE=104857600
 PDF_VIEWER_PROCESSING_TIMEOUT=1800
@@ -92,6 +118,59 @@ $metadata = [
 
 $document = $documentService->upload($uploadedFile, $metadata);
 ```
+
+### Multipart Upload (S3/Large Files)
+
+For large PDF files (especially when using S3), you can use multipart uploads with signed URLs for better performance and reliability:
+
+```php
+use Shakewellagency\LaravelPdfViewer\Services\DocumentService;
+
+$documentService = app(DocumentService::class);
+
+// 1. Initiate multipart upload
+$metadata = [
+    'title' => 'Large Aviation Manual',
+    'original_filename' => 'large-aviation-manual.pdf',
+    'file_size' => 52428800, // 50MB
+    'total_parts' => 10
+];
+
+$uploadData = $documentService->initiateMultipartUpload($metadata);
+$documentHash = $uploadData['document_hash'];
+$uploadId = $uploadData['upload_id'];
+
+// 2. Get signed URLs for each part (client-side upload)
+$urlsData = $documentService->getMultipartUploadUrls($documentHash, 10);
+$signedUrls = $urlsData['urls'];
+
+// Client uploads parts directly to S3 using the signed URLs
+// Each part returns an ETag that needs to be collected
+
+// 3. Complete the multipart upload
+$parts = [
+    ['PartNumber' => 1, 'ETag' => '"d41d8cd98f00b204e9800998ecf8427e"'],
+    ['PartNumber' => 2, 'ETag' => '"098f6bcd4621d373cade4e832627b4f6"'],
+    // ... more parts
+];
+
+$result = $documentService->completeMultipartUpload($documentHash, $parts);
+
+// 4. Or abort the upload if needed
+// $documentService->abortMultipartUpload($documentHash);
+```
+
+### Laravel Vapor Deployment
+
+The package is fully compatible with Laravel Vapor serverless deployment:
+
+1. **Automatic S3 Integration**: When `PDF_VIEWER_STORAGE_DISK=s3` is configured, the package automatically uses S3 for file storage.
+
+2. **Lambda Timeout Handling**: Processing is designed to work within Lambda's 15-minute timeout limit by using efficient page-by-page processing.
+
+3. **Temporary File Management**: All processing uses `/tmp` directory which is available in Lambda environments.
+
+4. **Package-Specific AWS Credentials**: Uses `PDF_VIEWER_AWS_*` environment variables to avoid conflicts with other packages or Vapor's own AWS configuration.
 
 ### Document Search
 
@@ -142,6 +221,18 @@ $cacheService->invalidateDocumentCache($documentHash);
 | `PUT` | `/api/pdf-viewer/documents/{hash}` | Update document metadata |
 | `DELETE` | `/api/pdf-viewer/documents/{hash}` | Delete document |
 | `GET` | `/api/pdf-viewer/documents/{hash}/progress` | Get processing progress |
+| `POST` | `/api/pdf-viewer/documents/{hash}/process` | Manually trigger processing |
+| `POST` | `/api/pdf-viewer/documents/{hash}/retry` | Retry failed processing |
+| `POST` | `/api/pdf-viewer/documents/{hash}/cancel` | Cancel ongoing processing |
+
+### Multipart Upload (S3)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/pdf-viewer/documents/multipart/initiate` | Initiate multipart upload |
+| `POST` | `/api/pdf-viewer/documents/{hash}/multipart/urls` | Get signed upload URLs |
+| `POST` | `/api/pdf-viewer/documents/{hash}/multipart/complete` | Complete multipart upload |
+| `DELETE` | `/api/pdf-viewer/documents/{hash}/multipart/abort` | Abort multipart upload |
 
 ### Page Management
 
@@ -150,14 +241,25 @@ $cacheService->invalidateDocumentCache($documentHash);
 | `GET` | `/api/pdf-viewer/documents/{hash}/pages` | List document pages |
 | `GET` | `/api/pdf-viewer/documents/{hash}/pages/{page}` | Get specific page |
 | `GET` | `/api/pdf-viewer/documents/{hash}/pages/{page}/thumbnail` | Get page thumbnail |
+| `GET` | `/api/pdf-viewer/documents/{hash}/pages/{page}/download` | Download specific page as PDF |
 
 ### Search
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/pdf-viewer/search/documents` | Search documents |
-| `GET` | `/api/pdf-viewer/search/pages` | Search pages |
+| `GET` | `/api/pdf-viewer/search/documents` | Search across all documents |
+| `GET` | `/api/pdf-viewer/search/documents/{hash}` | Search within specific document |
+| `GET` | `/api/pdf-viewer/search/pages` | Search pages with snippets |
 | `GET` | `/api/pdf-viewer/search/suggestions` | Get search suggestions |
+
+### Utilities
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/pdf-viewer/utils/cache/clear` | Clear all cached data |
+| `POST` | `/api/pdf-viewer/utils/cache/warm/{hash}` | Pre-generate cache for document |
+| `GET` | `/api/pdf-viewer/utils/stats` | Get system statistics |
+| `GET` | `/api/pdf-viewer/utils/health` | System health check |
 
 ## Job Processing Architecture
 
@@ -376,6 +478,39 @@ SHOW INDEX FROM pdf_document_pages WHERE Key_name LIKE '%content%';
 SHOW VARIABLES LIKE 'ft_min_word_len';
 ```
 
+## Laravel Vapor Deployment
+
+The package is fully compatible with Laravel Vapor for serverless deployment:
+
+### Quick Setup for Vapor
+
+1. **Configure for S3 Storage:**
+```env
+PDF_VIEWER_DISK=s3
+PDF_VIEWER_VAPOR_ENABLED=true
+AWS_BUCKET=www.shakewell.agency
+```
+
+2. **Copy Vapor configuration:**
+```bash
+cp vendor/shakewellagency/laravel-pdf-viewer/vapor.yml.example vapor.yml
+cp vendor/shakewellagency/laravel-pdf-viewer/.env.vapor.example .env.vapor
+```
+
+3. **Deploy to Vapor:**
+```bash
+vapor deploy production
+```
+
+### Vapor-Specific Features
+
+- **S3 Signed URLs** - API endpoints return signed URLs for secure file access
+- **Lambda Timeout Management** - Jobs automatically respect Lambda timeout limits
+- **Temporary File Handling** - Efficient temp file management in `/tmp`
+- **Memory Optimization** - Configurable memory limits for Lambda functions
+
+For detailed Vapor deployment instructions, see: [VAPOR-DEPLOYMENT.md](VAPOR-DEPLOYMENT.md)
+
 ## Security Considerations
 
 - Documents are identified by cryptographically secure hashes
@@ -383,6 +518,7 @@ SHOW VARIABLES LIKE 'ft_min_word_len';
 - Rate limiting on search endpoints
 - Authentication required for all API endpoints
 - Secure file storage with proper permissions
+- S3 signed URLs for secure file access in cloud deployments
 
 ## Contributing
 

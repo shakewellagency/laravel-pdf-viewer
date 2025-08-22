@@ -4,6 +4,7 @@ namespace Shakewellagency\LaravelPdfViewer\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
@@ -77,4 +78,5 @@ class PdfViewerServiceProvider extends ServiceProvider
             $this->loadRoutesFrom(__DIR__ . '/../../routes/api.php');
         });
     }
+
 }
