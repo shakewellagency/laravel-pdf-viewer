@@ -7,11 +7,11 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Laravel\Scout\Searchable;
+// use Laravel\Scout\Searchable; // Optional dependency
 
 class PdfDocumentPage extends Model
 {
-    use HasFactory, HasUuids, SoftDeletes, Searchable;
+    use HasFactory, HasUuids, SoftDeletes; // Searchable trait removed for now
 
     protected $fillable = [
         'pdf_document_id',
@@ -40,14 +40,22 @@ class PdfDocumentPage extends Model
     ];
 
     /**
+     * Create a new factory instance for the model.
+     */
+    protected static function newFactory()
+    {
+        return \Database\Factories\PdfDocumentPageFactory::new();
+    }
+
+    /**
      * Get the indexable data array for the model (Scout/Search)
      */
     public function toSearchableArray(): array
     {
         return [
             'id' => $this->id,
-            'document_hash' => $this->document->hash,
-            'document_title' => $this->document->title,
+            'document_hash' => $this->document->hash ?? null,
+            'document_title' => $this->document->title ?? null,
             'page_number' => $this->page_number,
             'content' => $this->content,
         ];
@@ -61,7 +69,7 @@ class PdfDocumentPage extends Model
         return $this->is_parsed && 
                !empty($this->content) && 
                $this->status === 'completed' &&
-               $this->document->is_searchable;
+               optional($this->document)->is_searchable;
     }
 
     /**

@@ -13,11 +13,23 @@ use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 class SearchServiceTest extends TestCase
 {
     protected SearchService $searchService;
+    protected $cacheServiceMock;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->searchService = new SearchService();
+
+        $this->cacheServiceMock = Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface::class);
+        
+        // Set up default cache mock expectations
+        $this->cacheServiceMock->shouldReceive('getCachedSearchResults')->andReturn(null)->byDefault();
+        $this->cacheServiceMock->shouldReceive('cacheSearchResults')->andReturn(true)->byDefault();
+        $this->cacheServiceMock->shouldReceive('getCachedSearchSuggestions')->andReturn(null)->byDefault();
+        $this->cacheServiceMock->shouldReceive('cacheSearchSuggestions')->andReturn(true)->byDefault();
+        $this->cacheServiceMock->shouldReceive('getCachedPopularSearches')->andReturn(null)->byDefault();
+        $this->cacheServiceMock->shouldReceive('cachePopularSearches')->andReturn(true)->byDefault();
+        
+        $this->searchService = new SearchService($this->cacheServiceMock);
     }
 
     public function test_search_documents_returns_results(): void
@@ -40,7 +52,7 @@ class SearchServiceTest extends TestCase
         ]);
 
         $page = PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'content' => 'This is aviation safety content with important procedures.',
             'status' => 'completed',
         ]);

@@ -49,6 +49,14 @@ class PdfDocument extends Model
     ];
 
     /**
+     * Create a new factory instance for the model.
+     */
+    protected static function newFactory()
+    {
+        return \Database\Factories\PdfDocumentFactory::new();
+    }
+
+    /**
      * Boot the model and set up event handlers
      */
     protected static function boot()

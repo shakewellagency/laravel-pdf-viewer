@@ -39,9 +39,14 @@ abstract class TestCase extends Orchestra
 
         // Set up PDF viewer configuration for testing
         config()->set('pdf-viewer.storage.disk', 'testing');
-        config()->set('pdf-viewer.cache.enabled', false); // Disable cache for testing
+        config()->set('pdf-viewer.cache.enabled', true); // Enable cache for testing but with array driver
+        config()->set('pdf-viewer.cache.store', 'array'); // Use array cache store for testing
+        config()->set('pdf-viewer.cache.ttl', 60); // Short TTL for testing
         config()->set('pdf-viewer.processing.max_file_size', 10485760); // 10MB for testing
         config()->set('pdf-viewer.thumbnails.enabled', false); // Disable thumbnails in tests
+        
+        // Set cache driver to array for testing
+        config()->set('cache.default', 'array');
     }
 
     protected function setUpDatabase(): void
