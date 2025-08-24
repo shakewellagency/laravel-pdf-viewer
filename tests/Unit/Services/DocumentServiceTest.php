@@ -157,8 +157,17 @@ class DocumentServiceTest extends TestCase
     public function test_get_progress_returns_processing_information(): void
     {
         $document = PdfDocument::factory()
-            ->has(PdfDocumentPage::factory()->count(5)->state(['status' => 'completed']), 'pages')
-            ->has(PdfDocumentPage::factory()->count(2)->state(['status' => 'failed']), 'pages')
+            ->has(PdfDocumentPage::factory()->count(5)->state(['status' => 'completed'])->sequence(
+                ['page_number' => 1],
+                ['page_number' => 2], 
+                ['page_number' => 3],
+                ['page_number' => 4],
+                ['page_number' => 5]
+            ), 'pages')
+            ->has(PdfDocumentPage::factory()->count(2)->state(['status' => 'failed'])->sequence(
+                ['page_number' => 6],
+                ['page_number' => 7]
+            ), 'pages')
             ->create([
                 'page_count' => 10,
                 'status' => 'processing',

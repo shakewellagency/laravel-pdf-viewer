@@ -39,6 +39,7 @@ class ProcessDocumentJobTest extends TestCase
         
         $processingService->shouldReceive('getPageCount')->with($document)->andReturn(3);
         $processingService->shouldReceive('extractPages')->with($document)->andReturn(true);
+        $processingService->shouldReceive('handleFailure')->andReturn(true);
         
         $job->handle($processingService, $pageService);
 
@@ -67,6 +68,7 @@ class ProcessDocumentJobTest extends TestCase
         $pageService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface::class);
         
         $processingService->shouldReceive('getPageCount')->with($document)->andThrow(new \Exception('File not found'));
+        $processingService->shouldReceive('handleFailure')->andReturn(true);
         
         $job->handle($processingService, $pageService);
 
@@ -99,6 +101,7 @@ class ProcessDocumentJobTest extends TestCase
         
         $processingService->shouldReceive('getPageCount')->with($document)->andReturn(5);
         $processingService->shouldReceive('extractPages')->with($document)->andReturn(true);
+        $processingService->shouldReceive('handleFailure')->andReturn(true);
         
         $job->handle($processingService, $pageService);
 
@@ -128,6 +131,7 @@ class ProcessDocumentJobTest extends TestCase
         $pageService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface::class);
         
         $processingService->shouldReceive('getPageCount')->with($document)->andReturn(0);
+        $processingService->shouldReceive('handleFailure')->andReturn(true);
         
         $job->handle($processingService, $pageService);
 
