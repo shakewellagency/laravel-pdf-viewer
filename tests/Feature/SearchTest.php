@@ -41,7 +41,7 @@ class SearchTest extends TestCase
         ]);
 
         $page = PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
             'content' => 'This page contains aviation safety procedures and emergency protocols.',
             'status' => 'completed',
@@ -102,7 +102,7 @@ class SearchTest extends TestCase
         ]);
 
         PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'content' => 'aviation safety aircraft maintenance',
         ]);
 

@@ -16,7 +16,7 @@ class PageRetrievalTest extends TestCase
         ]);
 
         $page = PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
             'content' => 'This is the content of page 1',
             'status' => 'completed',
@@ -51,7 +51,7 @@ class PageRetrievalTest extends TestCase
         ]);
 
         PdfDocumentPage::factory()->count(3)->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'status' => 'completed',
         ]);
 
@@ -110,7 +110,7 @@ class PageRetrievalTest extends TestCase
         $document = PdfDocument::factory()->create();
         
         $page = PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
             'status' => 'completed',
         ]);
@@ -133,7 +133,7 @@ class PageRetrievalTest extends TestCase
         $document = PdfDocument::factory()->create();
         
         PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
             'status' => 'completed',
         ]);
@@ -151,7 +151,7 @@ class PageRetrievalTest extends TestCase
         ]);
 
         PdfDocumentPage::factory()->count(25)->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
         ]);
 
         $response = $this->actingAsUser()
@@ -168,13 +168,13 @@ class PageRetrievalTest extends TestCase
         $document = PdfDocument::factory()->create();
 
         PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
             'status' => 'completed',
         ]);
 
         PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 2,
             'status' => 'processing',
         ]);
@@ -195,7 +195,7 @@ class PageRetrievalTest extends TestCase
         ]);
 
         $page = PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
             'status' => 'processing',
         ]);

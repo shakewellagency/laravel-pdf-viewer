@@ -5,6 +5,7 @@ namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Jobs;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Shakewellagency\LaravelPdfViewer\Jobs\ExtractPageJob;
 use Shakewellagency\LaravelPdfViewer\Jobs\ProcessDocumentJob;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
@@ -31,7 +32,15 @@ class ProcessDocumentJobTest extends TestCase
         );
 
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        
+        // Mock the services since this is a unit test
+        $processingService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface::class);
+        $pageService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface::class);
+        
+        $processingService->shouldReceive('getPageCount')->with($document)->andReturn(3);
+        $processingService->shouldReceive('extractPages')->with($document)->andReturn(true);
+        
+        $job->handle($processingService, $pageService);
 
         // Verify ExtractPageJob was dispatched for each page
         Bus::assertDispatched(ExtractPageJob::class, 3);
@@ -52,12 +61,19 @@ class ProcessDocumentJobTest extends TestCase
         ]);
 
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        
+        // Mock the services
+        $processingService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface::class);
+        $pageService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface::class);
+        
+        $processingService->shouldReceive('getPageCount')->with($document)->andThrow(new \Exception('File not found'));
+        
+        $job->handle($processingService, $pageService);
 
         // Verify document is marked as failed
         $document->refresh();
         $this->assertEquals('failed', $document->status);
-        $this->assertNotNull($document->error_message);
+        $this->assertNotNull($document->processing_error);
     }
 
     public function test_job_updates_document_progress(): void
@@ -76,7 +92,15 @@ class ProcessDocumentJobTest extends TestCase
         );
 
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        
+        // Mock the services
+        $processingService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface::class);
+        $pageService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface::class);
+        
+        $processingService->shouldReceive('getPageCount')->with($document)->andReturn(5);
+        $processingService->shouldReceive('extractPages')->with($document)->andReturn(true);
+        
+        $job->handle($processingService, $pageService);
 
         $document->refresh();
         $this->assertEquals('processing', $document->status);
@@ -98,7 +122,14 @@ class ProcessDocumentJobTest extends TestCase
         );
 
         $job = new ProcessDocumentJob($document);
-        $job->handle();
+        
+        // Mock the services
+        $processingService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface::class);
+        $pageService = \Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface::class);
+        
+        $processingService->shouldReceive('getPageCount')->with($document)->andReturn(0);
+        
+        $job->handle($processingService, $pageService);
 
         $document->refresh();
         $this->assertEquals('completed', $document->status);
