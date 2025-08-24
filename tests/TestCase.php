@@ -48,14 +48,14 @@ abstract class TestCase extends Orchestra
         // Set cache driver to array for testing
         config()->set('cache.default', 'array');
         
-        // Configure auth for testing
+        // Configure auth for testing - use session instead of sanctum for testing
         config()->set('auth.defaults.guard', 'web');
         config()->set('auth.guards.web', [
             'driver' => 'session',
             'provider' => 'users',
         ]);
         config()->set('auth.guards.sanctum', [
-            'driver' => 'sanctum',
+            'driver' => 'session', // Use session instead of sanctum for testing
             'provider' => 'users',
         ]);
         config()->set('auth.providers.users', [

@@ -50,7 +50,9 @@ class PageRetrievalTest extends TestCase
             'status' => 'completed',
         ]);
 
-        PdfDocumentPage::factory()->count(3)->create([
+        PdfDocumentPage::factory()->count(3)->sequence(function ($sequence) {
+            return ['page_number' => $sequence->index + 1];
+        })->create([
             'pdf_document_id' => $document->id,
             'status' => 'completed',
         ]);
@@ -150,7 +152,9 @@ class PageRetrievalTest extends TestCase
             'page_count' => 25,
         ]);
 
-        PdfDocumentPage::factory()->count(25)->create([
+        PdfDocumentPage::factory()->count(25)->sequence(function ($sequence) {
+            return ['page_number' => $sequence->index + 1];
+        })->create([
             'pdf_document_id' => $document->id,
         ]);
 
