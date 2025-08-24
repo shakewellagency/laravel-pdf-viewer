@@ -53,7 +53,7 @@ class PdfDocument extends Model
      */
     protected static function newFactory()
     {
-        return \Database\Factories\PdfDocumentFactory::new();
+        return \Shakewellagency\LaravelPdfViewer\Database\Factories\PdfDocumentFactory::new();
     }
 
     /**

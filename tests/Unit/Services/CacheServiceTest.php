@@ -4,6 +4,7 @@ namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Services\CacheService;
 use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
@@ -95,7 +96,7 @@ class CacheServiceTest extends TestCase
     public function test_warm_document_cache_preloads_data(): void
     {
         $document = PdfDocument::factory()
-            ->has(\Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage::class, 3)
+            ->has(PdfDocumentPage::factory()->count(3), 'pages')
             ->create([
                 'title' => 'Test Document',
                 'page_count' => 3,

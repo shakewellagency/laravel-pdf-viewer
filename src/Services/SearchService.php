@@ -33,19 +33,26 @@ class SearchService implements SearchServiceInterface
             return $this->paginateFromCache($cached, $perPage);
         }
 
-        // Build search query
+        // Build search query with database-specific search
+        $isMySQL = DB::getDriverName() === 'mysql';
+        
         $searchQuery = PdfDocument::query()
             ->searchable()
-            ->whereHas('pages', function (Builder $pageQuery) use ($query) {
-                $pageQuery->completed()
-                    ->whereRaw(
+            ->whereHas('pages', function (Builder $pageQuery) use ($query, $isMySQL) {
+                $pageQuery->completed();
+                if ($isMySQL) {
+                    $pageQuery->whereRaw(
                         'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
                         [$query]
                     );
+                } else {
+                    $pageQuery->where('content', 'LIKE', '%' . $query . '%');
+                }
             })
-            ->with(['pages' => function ($pageQuery) use ($query) {
-                $pageQuery->completed()
-                    ->whereRaw(
+            ->with(['pages' => function ($pageQuery) use ($query, $isMySQL) {
+                $pageQuery->completed();
+                if ($isMySQL) {
+                    $pageQuery->whereRaw(
                         'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
                         [$query]
                     )
@@ -53,25 +60,37 @@ class SearchService implements SearchServiceInterface
                         'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) DESC',
                         [$query]
                     );
+                } else {
+                    $pageQuery->where('content', 'LIKE', '%' . $query . '%')
+                             ->orderBy('page_number');
+                }
             }]);
 
         // Apply filters
         $this->applyFilters($searchQuery, $filters);
 
         // Execute search with relevance scoring
-        $results = $searchQuery
-            ->select([
-                'pdf_documents.*',
-                DB::raw('(
-                    SELECT MAX(MATCH(pdf_document_pages.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION))
-                    FROM pdf_document_pages 
-                    WHERE pdf_document_pages.pdf_document_id = pdf_documents.id 
-                    AND pdf_document_pages.status = "completed"
-                ) as relevance_score')
-            ])
-            ->addBinding($query, 'select')
-            ->orderBy('relevance_score', 'desc')
-            ->paginate($perPage);
+        if ($isMySQL) {
+            $results = $searchQuery
+                ->select([
+                    'pdf_documents.*',
+                    DB::raw('(
+                        SELECT MAX(MATCH(pdf_document_pages.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION))
+                        FROM pdf_document_pages 
+                        WHERE pdf_document_pages.pdf_document_id = pdf_documents.id 
+                        AND pdf_document_pages.status = "completed"
+                    ) as relevance_score')
+                ])
+                ->addBinding($query, 'select')
+                ->orderBy('relevance_score', 'desc')
+                ->paginate($perPage);
+        } else {
+            $results = $searchQuery
+                ->select('pdf_documents.*')
+                ->selectRaw('1.0 as relevance_score')
+                ->orderBy('created_at', 'desc')
+                ->paginate($perPage);
+        }
 
         // Process results for better presentation
         $processedResults = $results->getCollection()->map(function ($document) use ($query) {
@@ -118,23 +137,37 @@ class SearchService implements SearchServiceInterface
             return $this->paginateFromCache($cached, $perPage);
         }
 
-        // Execute search within document pages
-        $results = PdfDocumentPage::query()
+        // Execute search within document pages with database-specific search
+        $isMySQL = DB::getDriverName() === 'mysql';
+        
+        $query_builder = PdfDocumentPage::query()
             ->where('pdf_document_id', $document->id)
-            ->completed()
-            ->whereRaw(
-                'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
-                [$query]
-            )
-            ->select([
-                '*',
-                DB::raw('MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) as relevance_score')
-            ])
-            ->addBinding($query, 'select')
-            ->orderBy('relevance_score', 'desc')
-            ->orderBy('page_number', 'asc')
-            ->with('document')
-            ->paginate($perPage);
+            ->completed();
+            
+        if ($isMySQL) {
+            $results = $query_builder
+                ->whereRaw(
+                    'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
+                    [$query]
+                )
+                ->select([
+                    '*',
+                    DB::raw('MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) as relevance_score')
+                ])
+                ->addBinding($query, 'select')
+                ->orderBy('relevance_score', 'desc')
+                ->orderBy('page_number', 'asc')
+                ->with('document')
+                ->paginate($perPage);
+        } else {
+            $results = $query_builder
+                ->where('content', 'LIKE', '%' . $query . '%')
+                ->select('*')
+                ->selectRaw('1.0 as relevance_score')
+                ->orderBy('page_number', 'asc')
+                ->with('document')
+                ->paginate($perPage);
+        }
 
         // Process results with snippets
         $processedResults = $results->getCollection()->map(function ($page) use ($query) {
@@ -408,5 +441,47 @@ class SearchService implements SearchServiceInterface
             $perPage,
             $cached['current_page'] ?? 1
         );
+    }
+
+    public function getPopularSearches(int $limit = 10): array
+    {
+        // Return a simple array of popular search terms
+        // In a real implementation, this would track search frequency
+        return [
+            'aviation safety',
+            'maintenance procedures',
+            'flight operations',
+            'emergency procedures',
+            'aircraft systems',
+            'pilot training',
+            'regulatory compliance',
+            'safety inspection',
+            'technical manual',
+            'operational handbook',
+        ];
+    }
+
+    public function getSearchSuggestions(string $partial, int $limit = 5): array
+    {
+        // Return search suggestions based on partial input
+        // In a real implementation, this would query existing content
+        $suggestions = [
+            'aviation',
+            'aircraft',
+            'airport',
+            'maintenance',
+            'manual',
+            'management',
+            'safety',
+            'system',
+            'service',
+            'procedures',
+            'pilot',
+            'performance',
+        ];
+
+        return array_filter($suggestions, function($suggestion) use ($partial) {
+            return strpos($suggestion, strtolower($partial)) === 0;
+        });
     }
 }

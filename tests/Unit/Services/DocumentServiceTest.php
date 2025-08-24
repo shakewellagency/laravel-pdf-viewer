@@ -8,6 +8,7 @@ use Mockery;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Services\DocumentService;
 use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 use Shakewellagency\LaravelPdfViewer\Exceptions\DocumentNotFoundException;
@@ -156,8 +157,8 @@ class DocumentServiceTest extends TestCase
     public function test_get_progress_returns_processing_information(): void
     {
         $document = PdfDocument::factory()
-            ->has(\Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage::class, 5, ['status' => 'completed'])
-            ->has(\Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage::class, 2, ['status' => 'failed'])
+            ->has(PdfDocumentPage::factory()->count(5)->state(['status' => 'completed']), 'pages')
+            ->has(PdfDocumentPage::factory()->count(2)->state(['status' => 'failed']), 'pages')
             ->create([
                 'page_count' => 10,
                 'status' => 'processing',

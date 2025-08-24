@@ -57,7 +57,7 @@ class SearchServiceTest extends TestCase
             'status' => 'completed',
         ]);
 
-        $results = $this->searchService->searchPages('aviation safety');
+        $results = $this->searchService->searchPages($document->hash, 'aviation safety');
 
         $this->assertInstanceOf(LengthAwarePaginator::class, $results);
     }

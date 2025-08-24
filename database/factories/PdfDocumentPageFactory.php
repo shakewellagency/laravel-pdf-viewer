@@ -15,16 +15,18 @@ class PdfDocumentPageFactory extends Factory
         $content = $this->generatePageContent();
         
         return [
-            'document_id' => PdfDocument::factory(),
+            'pdf_document_id' => PdfDocument::factory(),
             'page_number' => $this->faker->numberBetween(1, 100),
             'content' => $content,
-            'content_length' => strlen($content),
-            'word_count' => str_word_count($content),
+            'page_file_path' => 'pdf-pages/' . $this->faker->uuid() . '/page-' . $this->faker->randomNumber() . '.pdf',
             'thumbnail_path' => 'thumbnails/' . $this->faker->uuid() . '/page-' . $this->faker->randomNumber() . '.jpg',
+            'metadata' => [
+                'width' => $this->faker->numberBetween(200, 800),
+                'height' => $this->faker->numberBetween(200, 1200),
+            ],
             'status' => $this->faker->randomElement(['pending', 'processing', 'completed', 'failed']),
-            'processing_started_at' => $this->faker->optional(0.7)->dateTimeBetween('-1 week', 'now'),
-            'processing_completed_at' => $this->faker->optional(0.6)->dateTimeBetween('-1 week', 'now'),
-            'error_message' => $this->faker->optional(0.1)->sentence(),
+            'processing_error' => $this->faker->optional(0.1)->sentence(),
+            'is_parsed' => $this->faker->boolean(80),
             'created_at' => $this->faker->dateTimeBetween('-1 month', 'now'),
             'updated_at' => $this->faker->dateTimeBetween('-1 month', 'now'),
         ];
@@ -35,12 +37,8 @@ class PdfDocumentPageFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'status' => 'pending',
             'content' => null,
-            'content_length' => 0,
-            'word_count' => 0,
             'thumbnail_path' => null,
-            'processing_started_at' => null,
-            'processing_completed_at' => null,
-            'error_message' => null,
+            'processing_error' => null,
         ]);
     }
 
@@ -49,11 +47,7 @@ class PdfDocumentPageFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'status' => 'processing',
             'content' => null,
-            'content_length' => 0,
-            'word_count' => 0,
-            'processing_started_at' => now(),
-            'processing_completed_at' => null,
-            'error_message' => null,
+            'processing_error' => null,
         ]);
     }
 
@@ -61,9 +55,7 @@ class PdfDocumentPageFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'status' => 'completed',
-            'processing_started_at' => now()->subMinutes(5),
-            'processing_completed_at' => now(),
-            'error_message' => null,
+            'processing_error' => null,
         ]);
     }
 
@@ -72,12 +64,8 @@ class PdfDocumentPageFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'status' => 'failed',
             'content' => null,
-            'content_length' => 0,
-            'word_count' => 0,
             'thumbnail_path' => null,
-            'processing_started_at' => now()->subMinutes(5),
-            'processing_completed_at' => null,
-            'error_message' => 'Failed to extract text from page',
+            'processing_error' => 'Failed to extract text from page',
         ]);
     }
 
@@ -85,10 +73,7 @@ class PdfDocumentPageFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'content' => $this->generateAviationContent(),
-        ])->afterMaking(function (PdfDocumentPage $page) {
-            $page->content_length = strlen($page->content);
-            $page->word_count = str_word_count($page->content);
-        });
+        ]);
     }
 
     private function generatePageContent(): string

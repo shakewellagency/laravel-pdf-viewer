@@ -29,7 +29,8 @@
     },
     "autoload": {
         "psr-4": {
-            "Shakewellagency\\LaravelPdfViewer\\": "src/"
+            "Shakewellagency\\LaravelPdfViewer\\": "src/",
+            "Shakewellagency\\LaravelPdfViewer\\Database\\Factories\\": "database/factories/"
         }
     },
     "autoload-dev": {

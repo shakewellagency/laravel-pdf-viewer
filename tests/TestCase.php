@@ -47,6 +47,21 @@ abstract class TestCase extends Orchestra
         
         // Set cache driver to array for testing
         config()->set('cache.default', 'array');
+        
+        // Configure auth for testing
+        config()->set('auth.defaults.guard', 'web');
+        config()->set('auth.guards.web', [
+            'driver' => 'session',
+            'provider' => 'users',
+        ]);
+        config()->set('auth.guards.sanctum', [
+            'driver' => 'sanctum',
+            'provider' => 'users',
+        ]);
+        config()->set('auth.providers.users', [
+            'driver' => 'eloquent',
+            'model' => \Illuminate\Foundation\Auth\User::class,
+        ]);
     }
 
     protected function setUpDatabase(): void
@@ -150,10 +165,22 @@ abstract class TestCase extends Orchestra
                "%%EOF\n";
     }
 
-    protected function createAuthenticatedUser(): object
+    protected function createAuthenticatedUser(): \Illuminate\Foundation\Auth\User
     {
-        // This would need to be adjusted based on your authentication setup
-        return (object) ['id' => $this->faker->uuid()];
+        // Create a simple User instance for testing
+        $user = new class extends \Illuminate\Foundation\Auth\User {
+            protected $fillable = ['id', 'email', 'name'];
+            public $incrementing = false;
+            protected $keyType = 'string';
+        };
+        
+        $user->forceFill([
+            'id' => $this->faker->uuid(),
+            'email' => $this->faker->email(),
+            'name' => $this->faker->name(),
+        ]);
+        
+        return $user;
     }
 
     protected function actingAsUser(): static
