@@ -44,10 +44,16 @@ class DocumentService implements DocumentServiceInterface
                 'mime_type' => $file->getMimeType(),
                 'file_size' => $file->getSize(),
                 'file_path' => $filePath,
-                'metadata' => $metadata,
                 'status' => 'uploaded',
                 'created_by' => auth()->id(),
             ]);
+
+            // Store metadata in normalized structure
+            foreach ($metadata as $key => $value) {
+                if ($key !== 'title') { // title is already stored in main table
+                    $document->setMetadata($key, $value);
+                }
+            }
 
             Log::info('Document uploaded successfully', [
                 'document_hash' => $document->hash,
@@ -93,7 +99,7 @@ class DocumentService implements DocumentServiceInterface
             'status' => $document->status,
             'is_searchable' => $document->is_searchable,
             'processing_progress' => $document->getProcessingProgress(),
-            'metadata' => $document->metadata,
+            'metadata' => $document->getAllMetadata(),
             'created_at' => $document->created_at,
             'updated_at' => $document->updated_at,
         ];
@@ -107,6 +113,23 @@ class DocumentService implements DocumentServiceInterface
     {
         $document = $this->findByHashOrFail($documentHash);
 
+        // Get detailed processing steps
+        $processingSteps = $document->processingSteps()
+            ->get()
+            ->keyBy('step_name')
+            ->map(function ($step) {
+                return [
+                    'status' => $step->status,
+                    'progress_percentage' => $step->progress_percentage,
+                    'completed_items' => $step->completed_items,
+                    'total_items' => $step->total_items,
+                    'failed_items' => $step->failed_items,
+                    'started_at' => $step->started_at,
+                    'completed_at' => $step->completed_at,
+                    'error_message' => $step->error_message,
+                ];
+            });
+
         return [
             'status' => $document->status,
             'progress_percentage' => $document->getProcessingProgress(),
@@ -116,7 +139,7 @@ class DocumentService implements DocumentServiceInterface
             'processing_started_at' => $document->processing_started_at,
             'processing_completed_at' => $document->processing_completed_at,
             'processing_error' => $document->processing_error,
-            'processing_progress' => $document->processing_progress,
+            'processing_steps' => $processingSteps,
         ];
     }
 
@@ -157,8 +180,11 @@ class DocumentService implements DocumentServiceInterface
             $updateData['title'] = $metadata['title'];
         }
         
+        // Update metadata in normalized structure
         if (isset($metadata['metadata'])) {
-            $updateData['metadata'] = array_merge($document->metadata ?? [], $metadata['metadata']);
+            foreach ($metadata['metadata'] as $key => $value) {
+                $document->setMetadata($key, $value);
+            }
         }
 
         $result = $document->update($updateData);
@@ -412,10 +438,16 @@ class DocumentService implements DocumentServiceInterface
             'mime_type' => 'application/pdf',
             'file_size' => $metadata['file_size'] ?? 0,
             'file_path' => $filePath,
-            'metadata' => $metadata,
             'status' => 'pending_upload',
             'created_by' => auth()->id(),
         ]);
+
+        // Store metadata in normalized structure
+        foreach ($metadata as $key => $value) {
+            if (!in_array($key, ['title', 'original_filename', 'file_size'])) {
+                $document->setMetadata($key, $value);
+            }
+        }
 
         // Get S3 client for multipart upload using reflection
         $adapter = $disk->getAdapter();
@@ -440,12 +472,8 @@ class DocumentService implements DocumentServiceInterface
             $uploadId = $result['UploadId'];
 
             // Store upload ID in document metadata
-            $document->update([
-                'metadata' => array_merge($document->metadata ?? [], [
-                    'multipart_upload_id' => $uploadId,
-                    'upload_initiated_at' => now()->toISOString(),
-                ])
-            ]);
+            $document->setMetadata('multipart_upload_id', $uploadId);
+            $document->setMetadata('upload_initiated_at', now()->toISOString());
 
             Log::info('Multipart upload initiated', [
                 'document_hash' => $document->hash,
@@ -484,7 +512,7 @@ class DocumentService implements DocumentServiceInterface
             throw new \Exception('Document is not in pending upload state');
         }
 
-        $uploadId = $document->metadata['multipart_upload_id'] ?? null;
+        $uploadId = $document->getMetadata('multipart_upload_id');
         if (!$uploadId) {
             throw new \Exception('No multipart upload ID found for document');
         }
@@ -550,7 +578,7 @@ class DocumentService implements DocumentServiceInterface
             throw new \Exception('Document is not in pending upload state');
         }
 
-        $uploadId = $document->metadata['multipart_upload_id'] ?? null;
+        $uploadId = $document->getMetadata('multipart_upload_id');
         if (!$uploadId) {
             throw new \Exception('No multipart upload ID found for document');
         }
@@ -583,11 +611,13 @@ class DocumentService implements DocumentServiceInterface
             $document->update([
                 'file_size' => $fileSize,
                 'status' => 'uploaded',
-                'metadata' => array_merge($document->metadata ?? [], [
-                    'upload_completed_at' => now()->toISOString(),
-                    'etag' => $result['ETag'] ?? null,
-                ])
             ]);
+
+            // Store upload completion metadata
+            $document->setMetadata('upload_completed_at', now()->toISOString());
+            if (isset($result['ETag'])) {
+                $document->setMetadata('etag', $result['ETag']);
+            }
 
             Log::info('Multipart upload completed successfully', [
                 'document_hash' => $documentHash,
@@ -616,7 +646,7 @@ class DocumentService implements DocumentServiceInterface
     {
         $document = $this->findByHashOrFail($documentHash);
         
-        $uploadId = $document->metadata['multipart_upload_id'] ?? null;
+        $uploadId = $document->getMetadata('multipart_upload_id');
         if (!$uploadId) {
             return true; // Nothing to abort
         }
