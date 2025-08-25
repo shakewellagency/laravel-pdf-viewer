@@ -16,6 +16,11 @@ interface PageProcessingServiceInterface
     public function extractPage(PdfDocument $document, int $pageNumber): string;
 
     /**
+     * Extract single page from PDF with comprehensive context and metadata
+     */
+    public function extractPageWithContext(PdfDocument $document, int $pageNumber): array;
+
+    /**
      * Extract text content from page
      */
     public function extractText(string $pageFilePath): string;

@@ -12,11 +12,12 @@ class PdfDocumentPageFactory extends Factory
 
     public function definition(): array
     {
+        static $pageNumber = 0;
         $content = $this->generatePageContent();
         
         return [
             'pdf_document_id' => PdfDocument::factory(),
-            'page_number' => $this->faker->numberBetween(1, 100),
+            'page_number' => ++$pageNumber,
             'content' => $content,
             'page_file_path' => 'pdf-pages/' . $this->faker->uuid() . '/page-' . $this->faker->randomNumber() . '.pdf',
             'thumbnail_path' => 'thumbnails/' . $this->faker->uuid() . '/page-' . $this->faker->randomNumber() . '.jpg',

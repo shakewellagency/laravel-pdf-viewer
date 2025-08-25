@@ -353,20 +353,39 @@ class DocumentService implements DocumentServiceInterface
     }
 
     /**
-     * Get a temporary signed URL for S3 files
+     * Get a temporary signed URL for files (S3 or local with signed URLs)
      */
     public function getSignedUrl(string $filePath, ?int $expiresIn = null): string
     {
         $disk = $this->getStorageDisk();
-        
-        if (!$this->isS3Disk($disk)) {
-            // For non-S3 disks, return the regular URL
-            return $disk->url($filePath);
-        }
-
         $expiresIn = $expiresIn ?? config('pdf-viewer.storage.signed_url_expires', 3600);
         
-        return $disk->temporaryUrl($filePath, now()->addSeconds($expiresIn));
+        if ($this->isS3Disk($disk)) {
+            return $disk->temporaryUrl($filePath, now()->addSeconds($expiresIn));
+        }
+        
+        // For local storage, generate signed URL with token
+        return $this->generateLocalSignedUrl($filePath, $expiresIn);
+    }
+
+    /**
+     * Generate signed URL for local storage
+     */
+    protected function generateLocalSignedUrl(string $filePath, int $expiresIn): string
+    {
+        $baseUrl = config('app.url');
+        $routePrefix = config('pdf-viewer.route_prefix', 'api/pdf-viewer');
+        
+        // Create a secure token for the file access
+        $payload = [
+            'file_path' => $filePath,
+            'expires_at' => now()->addSeconds($expiresIn)->timestamp,
+            'type' => 'page_access'
+        ];
+        
+        $token = encrypt($payload);
+        
+        return "{$baseUrl}/{$routePrefix}/secure-file/{$token}";
     }
 
     /**

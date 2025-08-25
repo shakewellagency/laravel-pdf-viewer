@@ -2,6 +2,7 @@
 
 namespace Shakewellagency\LaravelPdfViewer\Models;
 
+use Carbon\CarbonInterval;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -156,6 +157,59 @@ class PdfDocument extends Model
         }
 
         return round($bytes, 2) . ' ' . $units[$i];
+    }
+
+    /**
+     * Get file size in megabytes
+     */
+    public function getFileSizeInMbAttribute(): float
+    {
+        return round($this->file_size / 1024 / 1024, 2);
+    }
+
+    /**
+     * Check if document is currently processing
+     */
+    public function isProcessing(): bool
+    {
+        return $this->status === 'processing';
+    }
+
+    /**
+     * Check if document processing is completed
+     */
+    public function isCompleted(): bool
+    {
+        return $this->status === 'completed';
+    }
+
+    /**
+     * Check if document processing has failed
+     */
+    public function hasFailed(): bool
+    {
+        return $this->status === 'failed';
+    }
+
+    /**
+     * Get progress percentage
+     */
+    public function getProgressPercentage(): float
+    {
+        return $this->getProcessingProgress();
+    }
+
+    /**
+     * Get processing time duration
+     */
+    public function getProcessingTime(): ?CarbonInterval
+    {
+        if (!$this->processing_started_at) {
+            return null;
+        }
+
+        $endTime = $this->processing_completed_at ?? now();
+        return $this->processing_started_at->diffAsCarbonInterval($endTime);
     }
 
     /**
