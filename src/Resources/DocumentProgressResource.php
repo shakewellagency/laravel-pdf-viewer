@@ -9,7 +9,7 @@ class DocumentProgressResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        return [
+        $data = [
             'hash' => $this->hash,
             'title' => $this->title,
             'status' => $this->status,
@@ -20,16 +20,21 @@ class DocumentProgressResource extends JsonResource
             'processing_started_at' => $this->processing_started_at?->toISOString(),
             'processing_completed_at' => $this->processing_completed_at?->toISOString(),
             'processing_progress' => $this->processing_progress,
-            'processing_error' => $this->when(
-                $this->status === 'failed',
-                $this->processing_error
-            ),
             'is_searchable' => $this->is_searchable,
-            'estimated_completion' => $this->when(
-                $this->status === 'processing',
-                $this->getEstimatedCompletion()
-            ),
         ];
+
+        if ($this->status === 'failed') {
+            $data['processing_error'] = $this->processing_error;
+        }
+
+        if ($this->status === 'processing') {
+            $estimatedCompletion = $this->getEstimatedCompletion();
+            if ($estimatedCompletion !== null) {
+                $data['estimated_completion'] = $estimatedCompletion;
+            }
+        }
+
+        return $data;
     }
 
     protected function getEstimatedCompletion(): ?string
