@@ -41,6 +41,12 @@ Route::prefix('documents')->group(function () {
     Route::get('/{document_hash}/pages/{page_number}', [PageController::class, 'show'])->name('pdf-viewer.documents.pages.show');
     Route::get('/{document_hash}/pages/{page_number}/thumbnail', [PageController::class, 'thumbnail'])->name('pdf-viewer.documents.pages.thumbnail');
     Route::get('/{document_hash}/pages/{page_number}/download', [PageController::class, 'download'])->name('pdf-viewer.documents.pages.download');
+
+    // Compliance and audit routes
+    Route::get('/{document_hash}/download-original', [DocumentController::class, 'downloadOriginal'])->name('pdf-viewer.documents.download-original');
+    Route::get('/{document_hash}/compliance-report', [DocumentController::class, 'complianceReport'])->name('pdf-viewer.documents.compliance-report');
+    Route::get('/{document_hash}/detailed-progress', [DocumentController::class, 'detailedProgress'])->name('pdf-viewer.documents.detailed-progress');
+    Route::get('/{document_hash}/cross-ref-script.js', [DocumentController::class, 'crossReferenceScript'])->name('pdf-viewer.documents.cross-ref-script');
 });
 
 // Search routes
@@ -55,6 +61,9 @@ Route::prefix('search')->group(function () {
     Route::get('/suggestions', [SearchController::class, 'suggestions'])->name('pdf-viewer.search.suggestions');
 });
 
+// Secure file access route (for signed URLs with local storage)
+Route::get('/secure-file/{token}', [DocumentController::class, 'secureFileAccess'])->name('pdf-viewer.secure-file');
+
 // Utility routes
 Route::prefix('utils')->group(function () {
     // Cache management
@@ -64,4 +73,5 @@ Route::prefix('utils')->group(function () {
     // Statistics and monitoring
     Route::get('/stats', [DocumentController::class, 'stats'])->name('pdf-viewer.utils.stats');
     Route::get('/health', [DocumentController::class, 'health'])->name('pdf-viewer.utils.health');
+    Route::get('/monitoring', [DocumentController::class, 'monitoringDashboard'])->name('pdf-viewer.utils.monitoring');
 });

@@ -12,13 +12,19 @@ use Shakewellagency\LaravelPdfViewer\Requests\DocumentIndexRequest;
 use Shakewellagency\LaravelPdfViewer\Requests\DocumentUpdateRequest;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentResource;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentProgressResource;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
+use Shakewellagency\LaravelPdfViewer\Services\MonitoringService;
+use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
 
 class DocumentController extends Controller
 {
     public function __construct(
         protected DocumentServiceInterface $documentService,
         protected DocumentProcessingServiceInterface $processingService,
-        protected CacheServiceInterface $cacheService
+        protected CacheServiceInterface $cacheService,
+        protected ExtractionAuditService $auditService,
+        protected MonitoringService $monitoringService,
+        protected CrossReferenceService $crossRefService
     ) {}
 
     public function index(DocumentIndexRequest $request): JsonResponse
@@ -511,6 +517,228 @@ class DocumentController extends Controller
                 'message' => 'Failed to generate signed URLs',
                 'error' => $e->getMessage(),
             ], 422);
+        }
+    }
+
+    /**
+     * Handle secure file access for local storage signed URLs
+     */
+    public function secureFileAccess(string $token): \Illuminate\Http\Response
+    {
+        try {
+            // Decrypt and validate the token
+            $payload = decrypt($token);
+            
+            // Validate token structure
+            if (!is_array($payload) || !isset($payload['file_path'], $payload['expires_at'], $payload['type'])) {
+                abort(400, 'Invalid token format');
+            }
+            
+            // Check if token has expired
+            if (now()->timestamp > $payload['expires_at']) {
+                abort(403, 'Token has expired');
+            }
+            
+            // Validate token type
+            if ($payload['type'] !== 'page_access') {
+                abort(400, 'Invalid token type');
+            }
+            
+            $filePath = $payload['file_path'];
+            $disk = \Illuminate\Support\Facades\Storage::disk(config('pdf-viewer.storage.disk'));
+            
+            // Verify file exists
+            if (!$disk->exists($filePath)) {
+                abort(404, 'File not found');
+            }
+            
+            // Get file content and mime type
+            $content = $disk->get($filePath);
+            $mimeType = $disk->mimeType($filePath) ?: 'application/pdf';
+            
+            // Determine appropriate headers based on file type
+            $headers = [
+                'Content-Type' => $mimeType,
+                'Cache-Control' => 'private, max-age=3600',
+            ];
+            
+            // For PDF files, use inline disposition for browser viewing
+            if (str_contains($mimeType, 'pdf')) {
+                $headers['Content-Disposition'] = 'inline';
+            } else {
+                $headers['Content-Disposition'] = 'attachment';
+            }
+            
+            return response($content, 200, $headers);
+            
+        } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+            abort(400, 'Invalid token');
+        } catch (\Exception $e) {
+            abort(500, 'Failed to access file');
+        }
+    }
+
+    /**
+     * Download original document for compliance purposes
+     */
+    public function downloadOriginal(string $documentHash): \Illuminate\Http\Response
+    {
+        try {
+            $document = $this->documentService->findByHash($documentHash);
+            
+            if (!$document) {
+                abort(404, 'Document not found');
+            }
+
+            // Create audit trail for original document access
+            $audit = $this->auditService->initiateExtraction(
+                $document,
+                null, // No specific pages for full document
+                'full_document_download',
+                'Compliance access to original unmodified document'
+            );
+
+            $disk = \Illuminate\Support\Facades\Storage::disk(config('pdf-viewer.storage.disk'));
+            
+            if (!$disk->exists($document->file_path)) {
+                $this->auditService->recordExtractionFailure($audit, 'Original file not found', [
+                    'file_path' => $document->file_path,
+                    'disk' => config('pdf-viewer.storage.disk'),
+                ]);
+                abort(404, 'Original file not found');
+            }
+
+            // Get file content
+            $content = $disk->get($document->file_path);
+            
+            // Complete audit trail
+            $this->auditService->completeExtraction($audit);
+            
+            // Return file with proper headers for download
+            $headers = [
+                'Content-Type' => $document->mime_type ?: 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $document->original_filename . '"',
+                'Cache-Control' => 'private, no-cache',
+                'Content-Length' => strlen($content),
+            ];
+            
+            return response($content, 200, $headers);
+            
+        } catch (\Exception $e) {
+            Log::error('Original document download failed', [
+                'document_hash' => $documentHash,
+                'error' => $e->getMessage(),
+                'user_id' => auth()->id(),
+            ]);
+            
+            abort(500, 'Failed to download original document');
+        }
+    }
+
+    /**
+     * Get compliance report for document
+     */
+    public function complianceReport(string $documentHash): JsonResponse
+    {
+        try {
+            $report = $this->auditService->getComplianceReport($documentHash);
+            
+            return response()->json([
+                'data' => $report,
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate compliance report',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get monitoring dashboard data
+     */
+    public function monitoringDashboard(): JsonResponse
+    {
+        try {
+            $dashboardData = $this->monitoringService->getDashboardData();
+            
+            return response()->json([
+                'data' => $dashboardData,
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve monitoring data',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detailed document processing progress
+     */
+    public function detailedProgress(string $documentHash): JsonResponse
+    {
+        try {
+            $document = $this->documentService->findByHash($documentHash);
+            
+            if (!$document) {
+                return response()->json(['message' => 'Document not found'], 404);
+            }
+            
+            $progressData = $this->monitoringService->monitorDocumentProgress($document);
+            
+            return response()->json([
+                'data' => $progressData,
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve detailed progress',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get cross-reference navigation script for document
+     */
+    public function crossReferenceScript(string $documentHash): \Illuminate\Http\Response
+    {
+        try {
+            $document = $this->documentService->findByHash($documentHash);
+            
+            if (!$document) {
+                abort(404, 'Document not found');
+            }
+
+            // Get cross-reference map from cache
+            $crossRefMap = $this->crossRefService->getCachedCrossReferenceMap($documentHash);
+            
+            if (!$crossRefMap) {
+                // Generate cross-reference map if not cached
+                $crossRefMap = $this->crossRefService->analyzeCrossReferences($document);
+            }
+            
+            // Generate JavaScript for cross-reference navigation
+            $jsCode = $this->crossRefService->generateCrossReferenceNavigation($documentHash, $crossRefMap);
+            
+            return response($jsCode, 200, [
+                'Content-Type' => 'application/javascript',
+                'Cache-Control' => 'public, max-age=3600',
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Cross-reference script generation failed', [
+                'document_hash' => $documentHash,
+                'error' => $e->getMessage(),
+            ]);
+            
+            // Return empty script on error
+            return response('// Cross-reference navigation unavailable', 200, [
+                'Content-Type' => 'application/javascript',
+            ]);
         }
     }
 }
