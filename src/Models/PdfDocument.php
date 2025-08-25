@@ -23,8 +23,6 @@ class PdfDocument extends Model
         'file_path',
         'page_count',
         'status',
-        'metadata',
-        'processing_progress',
         'processing_error',
         'processing_started_at',
         'processing_completed_at',
@@ -33,8 +31,6 @@ class PdfDocument extends Model
     ];
 
     protected $casts = [
-        'metadata' => 'array',
-        'processing_progress' => 'array',
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
         'is_searchable' => 'boolean',
@@ -242,5 +238,81 @@ class PdfDocument extends Model
     public function scopeFailed($query)
     {
         return $query->where('status', 'failed');
+    }
+
+    /**
+     * Get document metadata
+     */
+    public function metadata(): HasMany
+    {
+        return $this->hasMany(PdfDocumentMetadata::class);
+    }
+
+    /**
+     * Get processing steps for this document
+     */
+    public function processingSteps(): HasMany
+    {
+        return $this->hasMany(PdfDocumentProcessingStep::class);
+    }
+
+    /**
+     * Get cross references for this document
+     */
+    public function crossReferences(): HasMany
+    {
+        return $this->hasMany(PdfCrossReference::class, 'document_hash', 'hash');
+    }
+
+    /**
+     * Get a specific metadata value by key
+     */
+    public function getMetadata(string $key, $default = null)
+    {
+        $metadata = $this->metadata()->where('key', $key)->first();
+        return $metadata ? $metadata->typed_value : $default;
+    }
+
+    /**
+     * Set a metadata value by key
+     */
+    public function setMetadata(string $key, $value): PdfDocumentMetadata
+    {
+        $metadata = $this->metadata()->updateOrCreate(
+            ['key' => $key],
+            []
+        );
+        
+        $metadata->setTypedValue($value);
+        $metadata->save();
+        
+        return $metadata;
+    }
+
+    /**
+     * Get all metadata as associative array
+     */
+    public function getAllMetadata(): array
+    {
+        return $this->metadata->pluck('typed_value', 'key')->toArray();
+    }
+
+    /**
+     * Get processing step by name
+     */
+    public function getProcessingStep(string $stepName): ?PdfDocumentProcessingStep
+    {
+        return $this->processingSteps()->where('step_name', $stepName)->first();
+    }
+
+    /**
+     * Create or update a processing step
+     */
+    public function updateProcessingStep(string $stepName, array $data): PdfDocumentProcessingStep
+    {
+        return $this->processingSteps()->updateOrCreate(
+            ['step_name' => $stepName],
+            $data
+        );
     }
 }

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 // use Laravel\Scout\Searchable; // Optional dependency
 
@@ -19,14 +20,12 @@ class PdfDocumentPage extends Model
         'content',
         'page_file_path',
         'thumbnail_path',
-        'metadata',
         'status',
         'processing_error',
         'is_parsed',
     ];
 
     protected $casts = [
-        'metadata' => 'array',
         'page_number' => 'integer',
         'is_parsed' => 'boolean',
         'created_at' => 'datetime',
@@ -203,5 +202,46 @@ class PdfDocumentPage extends Model
         return $query->whereHas('document', function ($q) use ($documentHash) {
             $q->where('hash', $documentHash);
         });
+    }
+
+    /**
+     * Get page metadata
+     */
+    public function metadata(): HasMany
+    {
+        return $this->hasMany(PdfPageMetadata::class);
+    }
+
+    /**
+     * Get a specific metadata value by key
+     */
+    public function getMetadata(string $key, $default = null)
+    {
+        $metadata = $this->metadata()->where('key', $key)->first();
+        return $metadata ? $metadata->typed_value : $default;
+    }
+
+    /**
+     * Set a metadata value by key
+     */
+    public function setMetadata(string $key, $value): PdfPageMetadata
+    {
+        $metadata = $this->metadata()->updateOrCreate(
+            ['key' => $key],
+            []
+        );
+        
+        $metadata->setTypedValue($value);
+        $metadata->save();
+        
+        return $metadata;
+    }
+
+    /**
+     * Get all metadata as associative array
+     */
+    public function getAllMetadata(): array
+    {
+        return $this->metadata->pluck('typed_value', 'key')->toArray();
     }
 }
