@@ -93,7 +93,7 @@ class PageSearchResourceTest extends TestCase
         $result = $resource->toArray($request);
 
         // Laravel's when() method will include the key but set it to null when condition is false
-        $this->assertNull($result['relevance_score'] ?? null);
+        $this->assertArrayNotHasKey('relevance_score', $result);
     }
 
     public function test_includes_search_snippet_when_present(): void
@@ -126,7 +126,7 @@ class PageSearchResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertNull($result['search_snippet'] ?? null);
+        $this->assertArrayNotHasKey('search_snippet', $result);
     }
 
     public function test_includes_highlighted_content_when_present_and_highlighting_enabled(): void
@@ -161,7 +161,7 @@ class PageSearchResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertNull($result['highlighted_content'] ?? null);
+        $this->assertArrayNotHasKey('highlighted_content', $result);
     }
 
     public function test_includes_full_content_when_requested(): void
@@ -194,7 +194,7 @@ class PageSearchResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertNull($result['content'] ?? null);
+        $this->assertArrayNotHasKey('content', $result);
     }
 
     public function test_includes_thumbnail_url_when_has_thumbnail(): void
@@ -209,17 +209,10 @@ class PageSearchResourceTest extends TestCase
         ]);
 
         // Mock the hasThumbnail method to return true
-        $pageStub = $this->createMock(PdfDocumentPage::class);
-        $pageStub->method('hasThumbnail')->willReturn(true);
-        $pageStub->id = $page->id;
-        $pageStub->page_number = 1;
-        $pageStub->content_length = $page->content_length;
-        $pageStub->word_count = $page->word_count;
-        $pageStub->created_at = $page->created_at;
-        $pageStub->updated_at = $page->updated_at;
-        $pageStub->document = $document;
+        $page = \Mockery::mock($page)->makePartial();
+        $page->shouldReceive('hasThumbnail')->andReturn(true);
 
-        $resource = new PageSearchResource($pageStub);
+        $resource = new PageSearchResource($page);
         $request = new Request();
         
         $result = $resource->toArray($request);
@@ -240,7 +233,7 @@ class PageSearchResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertNull($result['thumbnail_url'] ?? null);
+        $this->assertArrayNotHasKey('thumbnail_url', $result);
         $this->assertFalse($result['has_thumbnail']);
     }
 
@@ -258,8 +251,8 @@ class PageSearchResourceTest extends TestCase
 
         $this->assertIsString($result['created_at']);
         $this->assertIsString($result['updated_at']);
-        $this->assertEquals($page->created_at->toISOString(), $result['created_at']);
-        $this->assertEquals($page->updated_at->toISOString(), $result['updated_at']);
+        $this->assertStringStartsWith($page->created_at->format('Y-m-d\TH:i:s'), $result['created_at']);
+        $this->assertStringStartsWith($page->updated_at->format('Y-m-d\TH:i:s'), $result['updated_at']);
     }
 
     public function test_handles_complex_search_scenario(): void

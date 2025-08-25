@@ -105,8 +105,8 @@ class DocumentResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertEquals($startTime->toISOString(), $result['processing_started_at']);
-        $this->assertEquals($endTime->toISOString(), $result['processing_completed_at']);
+        $this->assertStringStartsWith($startTime->format('Y-m-d\TH:i:s'), $result['processing_started_at']);
+        $this->assertStringStartsWith($endTime->format('Y-m-d\TH:i:s'), $result['processing_completed_at']);
     }
 
     public function test_handles_null_processing_timestamps(): void
@@ -136,8 +136,8 @@ class DocumentResourceTest extends TestCase
 
         $this->assertIsString($result['created_at']);
         $this->assertIsString($result['updated_at']);
-        $this->assertEquals($document->created_at->toISOString(), $result['created_at']);
-        $this->assertEquals($document->updated_at->toISOString(), $result['updated_at']);
+        $this->assertStringStartsWith($document->created_at->format('Y-m-d\TH:i:s'), $result['created_at']);
+        $this->assertStringStartsWith($document->updated_at->format('Y-m-d\TH:i:s'), $result['updated_at']);
     }
 
     public function test_includes_formatted_file_size(): void

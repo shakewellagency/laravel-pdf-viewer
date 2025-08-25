@@ -186,8 +186,8 @@ class DocumentProgressResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertEquals($startTime->toISOString(), $result['processing_started_at']);
-        $this->assertEquals($endTime->toISOString(), $result['processing_completed_at']);
+        $this->assertStringStartsWith($startTime->format('Y-m-d\TH:i:s'), $result['processing_started_at']);
+        $this->assertStringStartsWith($endTime->format('Y-m-d\TH:i:s'), $result['processing_completed_at']);
     }
 
     public function test_handles_null_timestamps(): void

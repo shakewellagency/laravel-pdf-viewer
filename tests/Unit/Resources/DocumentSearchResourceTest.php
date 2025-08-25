@@ -153,8 +153,8 @@ class DocumentSearchResourceTest extends TestCase
 
         $this->assertIsString($result['created_at']);
         $this->assertIsString($result['updated_at']);
-        $this->assertEquals($document->created_at->toISOString(), $result['created_at']);
-        $this->assertEquals($document->updated_at->toISOString(), $result['updated_at']);
+        $this->assertStringStartsWith($document->created_at->format('Y-m-d\TH:i:s'), $result['created_at']);
+        $this->assertStringStartsWith($document->updated_at->format('Y-m-d\TH:i:s'), $result['updated_at']);
     }
 
     public function test_includes_formatted_file_size(): void

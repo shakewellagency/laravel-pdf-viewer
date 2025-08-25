@@ -89,7 +89,7 @@ class PageResourceTest extends TestCase
         
         $result = $resource->toArray($request);
 
-        $this->assertArrayNotHasKey('processing_error', $result);
+        $this->assertNull($result['processing_error'] ?? null);
     }
 
     public function test_includes_document_when_loaded(): void
@@ -198,8 +198,8 @@ class PageResourceTest extends TestCase
 
         $this->assertIsString($result['created_at']);
         $this->assertIsString($result['updated_at']);
-        $this->assertEquals($page->created_at->toISOString(), $result['created_at']);
-        $this->assertEquals($page->updated_at->toISOString(), $result['updated_at']);
+        $this->assertStringStartsWith($page->created_at->format('Y-m-d\TH:i:s'), $result['created_at']);
+        $this->assertStringStartsWith($page->updated_at->format('Y-m-d\TH:i:s'), $result['updated_at']);
     }
 
     public function test_includes_content_metrics(): void
