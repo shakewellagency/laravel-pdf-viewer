@@ -30,6 +30,9 @@ abstract class TestCase extends Orchestra
 
     protected function getEnvironmentSetUp($app): void
     {
+        // Set up app key for encryption
+        $app['config']->set('app.key', 'base64:' . base64_encode(random_bytes(32)));
+        
         config()->set('database.default', 'testing');
         config()->set('database.connections.testing', [
             'driver' => 'sqlite',
@@ -47,6 +50,9 @@ abstract class TestCase extends Orchestra
         
         // Set cache driver to array for testing
         config()->set('cache.default', 'array');
+        
+        // Disable auth middleware for testing
+        config()->set('pdf-viewer.middleware', ['api']);
         
         // Configure auth for testing - use session instead of sanctum for testing
         config()->set('auth.defaults.guard', 'web');
@@ -189,5 +195,11 @@ abstract class TestCase extends Orchestra
         // Mock authentication - adjust based on your auth system
         $this->actingAs($user);
         return $this;
+    }
+
+    protected function withoutAuthentication(): void
+    {
+        // Temporarily disable auth middleware for this test
+        config()->set('pdf-viewer.middleware', ['api']);
     }
 }
