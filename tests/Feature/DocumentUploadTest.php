@@ -11,7 +11,7 @@ class DocumentUploadTest extends TestCase
     public function test_can_upload_pdf_document_successfully(): void
     {
         $file = $this->createSamplePdfFile('aviation-manual.pdf');
-        
+
         $response = $this->actingAsUser()
             ->postJson('/api/pdf-viewer/documents', [
                 'file' => $file,
@@ -24,18 +24,18 @@ class DocumentUploadTest extends TestCase
             ]);
 
         $response->assertStatus(201)
-                 ->assertJsonStructure([
-                     'message',
-                     'data' => [
-                         'id',
-                         'hash',
-                         'title',
-                         'filename',
-                         'file_size',
-                         'status',
-                         'created_at',
-                     ],
-                 ]);
+            ->assertJsonStructure([
+                'message',
+                'data' => [
+                    'id',
+                    'hash',
+                    'title',
+                    'filename',
+                    'file_size',
+                    'status',
+                    'created_at',
+                ],
+            ]);
 
         $this->assertDatabaseHas('pdf_documents', [
             'title' => 'Aviation Safety Manual',
@@ -47,8 +47,8 @@ class DocumentUploadTest extends TestCase
     public function test_can_upload_real_sample_pdf(): void
     {
         $samplePdf = $this->createRealSamplePdf();
-        
-        if (!$samplePdf) {
+
+        if (! $samplePdf) {
             $this->markTestSkipped('No sample PDF files found in SamplePDF directory');
         }
 
@@ -60,7 +60,7 @@ class DocumentUploadTest extends TestCase
             ]);
 
         $response->assertStatus(201);
-        
+
         $this->assertDatabaseHas('pdf_documents', [
             'title' => 'Real Aviation Document',
             'status' => 'uploaded',
@@ -78,16 +78,16 @@ class DocumentUploadTest extends TestCase
             ]);
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['file']);
+            ->assertJsonValidationErrors(['file']);
     }
 
     public function test_upload_fails_with_oversized_file(): void
     {
         // Set a very small file size limit for testing
         config(['pdf-viewer.processing.max_file_size' => 1024]); // 1KB
-        
+
         $file = UploadedFile::fake()->create('large.pdf', 2048) // 2KB
-                           ->mimeType('application/pdf');
+            ->mimeType('application/pdf');
 
         $response = $this->actingAsUser()
             ->postJson('/api/pdf-viewer/documents', [
@@ -96,7 +96,7 @@ class DocumentUploadTest extends TestCase
             ]);
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['file']);
+            ->assertJsonValidationErrors(['file']);
     }
 
     public function test_upload_requires_authentication(): void
@@ -120,7 +120,7 @@ class DocumentUploadTest extends TestCase
             ]);
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['file']);
+            ->assertJsonValidationErrors(['file']);
     }
 
     public function test_upload_validates_metadata_structure(): void
@@ -137,7 +137,7 @@ class DocumentUploadTest extends TestCase
             ]);
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['metadata.author']);
+            ->assertJsonValidationErrors(['metadata.author']);
     }
 
     public function test_upload_sets_default_title_from_filename(): void

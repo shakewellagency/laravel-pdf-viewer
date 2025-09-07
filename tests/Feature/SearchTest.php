@@ -4,6 +4,7 @@ namespace Shakewellagency\LaravelPdfViewer\Tests\Feature;
 
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
+use Shakewellagency\LaravelPdfViewer\Models\PdfPageContent;
 use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
 class SearchTest extends TestCase
@@ -17,20 +18,20 @@ class SearchTest extends TestCase
         ]);
 
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/documents?q=aviation');
+            ->getJson('/api/pdf-viewer/search?q=aviation');
 
         $response->assertStatus(200)
-                 ->assertJsonStructure([
-                     'data' => [
-                         '*' => [
-                             'id',
-                             'hash',
-                             'title',
-                             'relevance_score',
-                         ],
-                     ],
-                     'meta' => ['total', 'per_page'],
-                 ]);
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'hash',
+                        'title',
+                        'relevance_score',
+                    ],
+                ],
+                'meta' => ['total', 'per_page'],
+            ]);
     }
 
     public function test_can_search_pages_by_content(): void
@@ -41,37 +42,42 @@ class SearchTest extends TestCase
         ]);
 
         $page = PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
+            'pdf_document_id' => $document->id,
             'page_number' => 1,
-            'content' => 'This page contains aviation safety procedures and emergency protocols.',
             'status' => 'completed',
         ]);
 
+        // Create page content in the separate content table
+        PdfPageContent::createOrUpdateForPage(
+            $page,
+            'This page contains aviation safety procedures and emergency protocols.'
+        );
+
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/pages?q=safety procedures');
+            ->getJson('/api/pdf-viewer/search/documents/{$document->hash}?q=safety procedures');
 
         $response->assertStatus(200)
-                 ->assertJsonStructure([
-                     'data' => [
-                         '*' => [
-                             'id',
-                             'page_number',
-                             'content_length',
-                             'relevance_score',
-                             'search_snippet',
-                             'document' => [
-                                 'hash',
-                                 'title',
-                             ],
-                         ],
-                     ],
-                     'meta' => ['total', 'per_page'],
-                 ]);
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'page_number',
+                        'content_length',
+                        'relevance_score',
+                        'search_snippet',
+                        'document' => [
+                            'hash',
+                            'title',
+                        ],
+                    ],
+                ],
+                'meta' => ['total', 'per_page'],
+            ]);
     }
 
     public function test_search_requires_authentication(): void
     {
-        $response = $this->getJson('/api/pdf-viewer/search/documents?q=aviation');
+        $response = $this->getJson('/api/pdf-viewer/search?q=aviation');
 
         $response->assertStatus(401);
     }
@@ -79,19 +85,19 @@ class SearchTest extends TestCase
     public function test_search_validates_query_parameter(): void
     {
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/documents');
+            ->getJson('/api/pdf-viewer/search');
 
         $response->assertStatus(422)
-                 ->assertJsonValidationErrors(['q']);
+            ->assertJsonValidationErrors(['q']);
     }
 
     public function test_search_returns_empty_results_for_no_matches(): void
     {
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/documents?q=nonexistentquery');
+            ->getJson('/api/pdf-viewer/search?q=nonexistentquery');
 
         $response->assertStatus(200)
-                 ->assertJsonCount(0, 'data');
+            ->assertJsonCount(0, 'data');
     }
 
     public function test_can_get_search_suggestions(): void
@@ -101,18 +107,23 @@ class SearchTest extends TestCase
             'is_searchable' => true,
         ]);
 
-        PdfDocumentPage::factory()->create([
-            'document_id' => $document->id,
-            'content' => 'aviation safety aircraft maintenance',
+        $page = PdfDocumentPage::factory()->create([
+            'pdf_document_id' => $document->id,
         ]);
+
+        // Create page content in the separate content table
+        PdfPageContent::createOrUpdateForPage(
+            $page,
+            'aviation safety aircraft maintenance'
+        );
 
         $response = $this->actingAsUser()
             ->getJson('/api/pdf-viewer/search/suggestions?q=aviat');
 
         $response->assertStatus(200)
-                 ->assertJsonStructure([
-                     'suggestions' => [],
-                 ]);
+            ->assertJsonStructure([
+                'suggestions' => [],
+            ]);
     }
 
     public function test_search_with_filters_applies_constraints(): void
@@ -132,14 +143,14 @@ class SearchTest extends TestCase
         ]);
 
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/documents?' . http_build_query([
+            ->getJson('/api/pdf-viewer/search?'.http_build_query([
                 'q' => 'aviation',
                 'status' => 'completed',
                 'date_from' => now()->subDays(1)->format('Y-m-d'),
             ]));
 
         $response->assertStatus(200);
-        
+
         $data = $response->json('data');
         $this->assertCount(1, $data);
         $this->assertEquals('Aviation Safety', $data[0]['title']);
@@ -154,12 +165,12 @@ class SearchTest extends TestCase
         ]);
 
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/documents?q=aviation&per_page=5');
+            ->getJson('/api/pdf-viewer/search?q=aviation&per_page=5');
 
         $response->assertStatus(200)
-                 ->assertJsonCount(5, 'data')
-                 ->assertJsonPath('meta.per_page', 5)
-                 ->assertJsonPath('meta.total', 15);
+            ->assertJsonCount(5, 'data')
+            ->assertJsonPath('meta.per_page', 5)
+            ->assertJsonPath('meta.total', 15);
     }
 
     public function test_search_excludes_non_searchable_documents(): void
@@ -177,10 +188,10 @@ class SearchTest extends TestCase
         ]);
 
         $response = $this->actingAsUser()
-            ->getJson('/api/pdf-viewer/search/documents?q=aviation');
+            ->getJson('/api/pdf-viewer/search?q=aviation');
 
         $response->assertStatus(200);
-        
+
         $titles = collect($response->json('data'))->pluck('title')->toArray();
         $this->assertContains('Aviation Safety Manual', $titles);
         $this->assertNotContains('Aviation Maintenance Guide', $titles);
