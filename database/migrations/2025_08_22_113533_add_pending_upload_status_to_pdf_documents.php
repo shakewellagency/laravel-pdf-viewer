@@ -12,8 +12,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Add pending_upload to the status enum
-        DB::statement("ALTER TABLE pdf_documents MODIFY COLUMN status ENUM('uploaded', 'processing', 'completed', 'failed', 'cancelled', 'pending_upload') NOT NULL DEFAULT 'uploaded'");
+        // Add pending_upload to the status enum (MySQL only)
+        if (Schema::getConnection()->getDriverName() === 'mysql') {
+            DB::statement("ALTER TABLE pdf_documents MODIFY COLUMN status ENUM('uploaded', 'processing', 'completed', 'failed', 'cancelled', 'pending_upload') NOT NULL DEFAULT 'uploaded'");
+        }
     }
 
     /**
@@ -21,7 +23,9 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Remove pending_upload from the status enum
-        DB::statement("ALTER TABLE pdf_documents MODIFY COLUMN status ENUM('uploaded', 'processing', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'uploaded'");
+        // Remove pending_upload from the status enum (MySQL only)
+        if (Schema::getConnection()->getDriverName() === 'mysql') {
+            DB::statement("ALTER TABLE pdf_documents MODIFY COLUMN status ENUM('uploaded', 'processing', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'uploaded'");
+        }
     }
 };
