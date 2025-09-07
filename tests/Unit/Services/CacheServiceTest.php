@@ -14,7 +14,7 @@ class CacheServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->cacheService = new CacheService();
+        $this->cacheService = new CacheService;
         Cache::flush();
     }
 
@@ -30,7 +30,7 @@ class CacheServiceTest extends TestCase
         $result = $this->cacheService->cacheDocumentMetadata($hash, $metadata);
 
         $this->assertTrue($result);
-        
+
         $cached = $this->cacheService->getCachedDocumentMetadata($hash);
         $this->assertEquals($metadata, $cached);
     }
@@ -54,7 +54,7 @@ class CacheServiceTest extends TestCase
         $result = $this->cacheService->cachePageContent($hash, $pageNumber, $content);
 
         $this->assertTrue($result);
-        
+
         $cached = $this->cacheService->getCachedPageContent($hash, $pageNumber);
         $this->assertEquals($content, $cached);
     }
@@ -70,7 +70,7 @@ class CacheServiceTest extends TestCase
         $result = $this->cacheService->cacheSearchResults($query, $results);
 
         $this->assertTrue($result);
-        
+
         $cached = $this->cacheService->getCachedSearchResults($query);
         $this->assertEquals($results, $cached);
     }
@@ -78,7 +78,7 @@ class CacheServiceTest extends TestCase
     public function test_invalidate_document_cache_removes_all_related_data(): void
     {
         $hash = 'test-document-hash';
-        
+
         // Cache some data
         $this->cacheService->cacheDocumentMetadata($hash, ['title' => 'Test']);
         $this->cacheService->cachePageContent($hash, 1, ['text' => 'Content']);
@@ -86,7 +86,7 @@ class CacheServiceTest extends TestCase
         $result = $this->cacheService->invalidateDocumentCache($hash);
 
         $this->assertTrue($result);
-        
+
         // Verify data is removed
         $this->assertNull($this->cacheService->getCachedDocumentMetadata($hash));
         $this->assertNull($this->cacheService->getCachedPageContent($hash, 1));
@@ -104,7 +104,7 @@ class CacheServiceTest extends TestCase
         $result = $this->cacheService->warmDocumentCache($document->hash);
 
         $this->assertTrue($result);
-        
+
         // Verify metadata is cached
         $cached = $this->cacheService->getCachedDocumentMetadata($document->hash);
         $this->assertNotNull($cached);
@@ -133,7 +133,7 @@ class CacheServiceTest extends TestCase
         $result = $this->cacheService->clearAllCache();
 
         $this->assertTrue($result);
-        
+
         // Verify all data is removed
         $this->assertNull($this->cacheService->getCachedDocumentMetadata('hash1'));
         $this->assertNull($this->cacheService->getCachedSearchResults('query'));

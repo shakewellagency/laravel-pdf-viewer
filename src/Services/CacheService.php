@@ -356,6 +356,8 @@ class CacheService implements CacheServiceInterface
             'cache_store' => $this->cacheStore,
             'tags_supported' => $this->supportsTags(),
             'prefix' => $this->prefix,
+            'total_keys' => 0, // Placeholder - would need cache driver specific implementation
+            'memory_usage' => 0, // Placeholder - would need cache driver specific implementation
         ];
     }
 
