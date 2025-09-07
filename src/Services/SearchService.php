@@ -10,6 +10,7 @@ use Shakewellagency\LaravelPdfViewer\Contracts\SearchServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
+use Shakewellagency\LaravelPdfViewer\Models\PdfPageContent;
 
 class SearchService implements SearchServiceInterface
 {
@@ -33,38 +34,30 @@ class SearchService implements SearchServiceInterface
             return $this->paginateFromCache($cached, $perPage);
         }
 
-        // Build search query
+        // Build search query using the separated content table
         $searchQuery = PdfDocument::query()
             ->searchable()
-            ->whereHas('pages', function (Builder $pageQuery) use ($query) {
-                $pageQuery->completed()
-                    ->whereRaw(
-                        'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
-                        [$query]
-                    );
+            ->whereHas('pages.content', function (Builder $contentQuery) use ($query) {
+                $contentQuery->search($query);
             })
             ->with(['pages' => function ($pageQuery) use ($query) {
                 $pageQuery->completed()
-                    ->whereRaw(
-                        'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
-                        [$query]
-                    )
-                    ->orderByRaw(
-                        'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) DESC',
-                        [$query]
-                    );
+                    ->with(['content' => function ($contentQuery) use ($query) {
+                        $contentQuery->searchWithRelevance($query);
+                    }]);
             }]);
 
         // Apply filters
         $this->applyFilters($searchQuery, $filters);
 
-        // Execute search with relevance scoring
+        // Execute search with relevance scoring using the separated content table
         $results = $searchQuery
             ->select([
                 'pdf_documents.*',
                 DB::raw('(
-                    SELECT MAX(MATCH(pdf_document_pages.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION))
-                    FROM pdf_document_pages 
+                    SELECT MAX(MATCH(pdf_page_content.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION))
+                    FROM pdf_page_content
+                    INNER JOIN pdf_document_pages ON pdf_page_content.page_id = pdf_document_pages.id
                     WHERE pdf_document_pages.pdf_document_id = pdf_documents.id 
                     AND pdf_document_pages.status = "completed"
                 ) as relevance_score')
@@ -118,28 +111,29 @@ class SearchService implements SearchServiceInterface
             return $this->paginateFromCache($cached, $perPage);
         }
 
-        // Execute search within document pages
+        // Execute search within document pages using the separated content table
         $results = PdfDocumentPage::query()
             ->where('pdf_document_id', $document->id)
             ->completed()
-            ->whereRaw(
-                'MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION)',
-                [$query]
-            )
+            ->whereHas('content', function (Builder $contentQuery) use ($query) {
+                $contentQuery->search($query);
+            })
+            ->join('pdf_page_content', 'pdf_document_pages.id', '=', 'pdf_page_content.page_id')
             ->select([
-                '*',
-                DB::raw('MATCH(content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) as relevance_score')
+                'pdf_document_pages.*',
+                DB::raw('MATCH(pdf_page_content.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) as relevance_score')
             ])
             ->addBinding($query, 'select')
             ->orderBy('relevance_score', 'desc')
             ->orderBy('page_number', 'asc')
-            ->with('document')
+            ->with(['document', 'content'])
             ->paginate($perPage);
 
         // Process results with snippets
         $processedResults = $results->getCollection()->map(function ($page) use ($query) {
-            $page->search_snippet = $this->generateSnippet($page->content, $query);
-            $page->highlighted_content = $this->highlightContent($page->content, $query);
+            $contentText = $page->content ? $page->content->content : '';
+            $page->search_snippet = $this->generateSnippet($contentText, $query);
+            $page->highlighted_content = $this->highlightContent($contentText, $query);
             $page->relevance_score = round($page->relevance_score, 4);
             return $page;
         });
@@ -160,17 +154,18 @@ class SearchService implements SearchServiceInterface
             return [];
         }
 
-        // Get common terms from indexed content
-        $suggestions = DB::table('pdf_document_pages')
-            ->select(DB::raw('content'))
-            ->where('status', 'completed')
-            ->where('is_parsed', true)
-            ->whereRaw('content LIKE ?', ['%' . $query . '%'])
+        // Get common terms from indexed content using the separated content table
+        $suggestions = DB::table('pdf_page_content')
+            ->join('pdf_document_pages', 'pdf_page_content.page_id', '=', 'pdf_document_pages.id')
+            ->select(DB::raw('pdf_page_content.content'))
+            ->where('pdf_document_pages.status', 'completed')
+            ->where('pdf_document_pages.is_parsed', true)
+            ->whereRaw('pdf_page_content.content LIKE ?', ['%' . $query . '%'])
             ->limit(50)
             ->get()
-            ->flatMap(function ($page) use ($query) {
+            ->flatMap(function ($pageContent) use ($query) {
                 // Extract words around the query term
-                preg_match_all('/\b\w*' . preg_quote($query, '/') . '\w*\b/i', $page->content, $matches);
+                preg_match_all('/\b\w*' . preg_quote($query, '/') . '\w*\b/i', $pageContent->content, $matches);
                 return $matches[0];
             })
             ->unique()
@@ -292,11 +287,16 @@ class SearchService implements SearchServiceInterface
             return false;
         }
 
-        return $page->update([
-            'content' => $content,
+        // Update page status
+        $page->update([
             'is_parsed' => true,
             'status' => 'completed',
         ]);
+
+        // Store content in separated table
+        PdfPageContent::createOrUpdateForPage($page, $content);
+
+        return true;
     }
 
     public function removeFromIndex(string $documentHash): bool
@@ -307,9 +307,12 @@ class SearchService implements SearchServiceInterface
             return false;
         }
 
-        // Remove from search index by clearing content
+        // Remove content from separated table
+        $pageIds = $document->pages()->pluck('id');
+        PdfPageContent::whereIn('page_id', $pageIds)->delete();
+
+        // Update page status
         $document->pages()->update([
-            'content' => null,
             'is_parsed' => false,
         ]);
 
@@ -342,9 +345,10 @@ class SearchService implements SearchServiceInterface
             'searchable_documents' => PdfDocument::searchable()->count(),
             'total_pages' => PdfDocumentPage::count(),
             'indexed_pages' => PdfDocumentPage::parsed()->count(),
-            'total_content_size' => DB::table('pdf_document_pages')
-                ->selectRaw('SUM(LENGTH(content)) as total_size')
+            'total_content_size' => DB::table('pdf_page_content')
+                ->selectRaw('SUM(content_length) as total_size')
                 ->value('total_size') ?? 0,
+            'content_stats' => PdfPageContent::getContentStats(),
         ];
     }
 
@@ -386,9 +390,10 @@ class SearchService implements SearchServiceInterface
     protected function generateDocumentSnippets(PdfDocument $document, string $query): array
     {
         return $document->pages->take(3)->map(function ($page) use ($query) {
+            $contentText = $page->content ? $page->content->content : '';
             return [
                 'page_number' => $page->page_number,
-                'snippet' => $this->generateSnippet($page->content, $query),
+                'snippet' => $this->generateSnippet($contentText, $query),
             ];
         })->toArray();
     }

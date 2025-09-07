@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Hash;
+use Shakewellagency\LaravelPdfViewer\Database\Factories\PdfDocumentFactory;
 
 class PdfDocument extends Model
 {
@@ -180,5 +181,13 @@ class PdfDocument extends Model
     public function scopeFailed($query)
     {
         return $query->where('status', 'failed');
+    }
+
+    /**
+     * Create a new factory instance for the model.
+     */
+    protected static function newFactory()
+    {
+        return PdfDocumentFactory::new();
     }
 }
