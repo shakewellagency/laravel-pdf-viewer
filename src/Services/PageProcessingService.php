@@ -4,6 +4,10 @@ namespace Shakewellagency\LaravelPdfViewer\Services;
 
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Aws\S3\S3Client;
+use League\Flysystem\AwsS3V3\AwsS3V3Adapter;
+use League\Flysystem\Filesystem;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
@@ -97,42 +101,44 @@ class PageProcessingService implements PageProcessingServiceInterface
      */
     protected function extractPageLocally(PdfDocument $document, int $pageNumber, string $pagePath): string
     {
-        $sourceFile = storage_path('app/' . $document->file_path);
-        $pageFile = storage_path('app/' . $pagePath);
+        // For Vapor compatibility, use /tmp for all file operations
+        $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+        $sourceFile = $tempDir . '/' . basename($document->file_path);
+        $pageFile = $tempDir . '/' . uniqid() . '_page_' . $pageNumber . '.pdf';
         
-        // Ensure the directory exists
-        $pageDir = dirname($pageFile);
-        if (!file_exists($pageDir)) {
-            mkdir($pageDir, 0755, true);
+        // Download/copy source file to temp location
+        $disk = $this->getStorageDisk();
+        if ($this->isS3Disk($disk)) {
+            $pdfContent = $disk->get($document->file_path);
+            file_put_contents($sourceFile, $pdfContent);
+        } else {
+            $originalPath = storage_path('app/' . $document->file_path);
+            if (file_exists($originalPath)) {
+                copy($originalPath, $sourceFile);
+            } else {
+                throw new \Exception("Source PDF file not found: {$originalPath}");
+            }
         }
 
-        if ($this->isPdftkAvailable()) {
-            // Use pdftk to extract specific page
-            $command = "pdftk \"{$sourceFile}\" cat {$pageNumber} output \"{$pageFile}\"";
-            exec($command, $output, $returnVar);
-            
-            if ($returnVar !== 0) {
-                throw new \Exception("Failed to extract page {$pageNumber}");
-            }
-        } else {
-            // Pure PHP approach: Since we can't extract individual pages without system dependencies,
-            // we'll create a lightweight approach that works with our text extraction method.
-            // 
-            // Instead of creating individual page PDFs (which requires complex PDF manipulation),
-            // we'll create a symbolic approach where each "page file" is actually a reference
-            // to the original PDF with page metadata.
-            
-            Log::info("Creating page reference without system dependencies", [
-                'document_hash' => $document->hash,
-                'page_number' => $pageNumber,
-                'original_pdf' => $sourceFile,
-                'page_path' => $pagePath
-            ]);
-            
-            // Create a minimal reference file that our text extraction can understand
-            // This works because our extractText method now reads from the original PDF anyway
-            if (file_exists($sourceFile)) {
-                // Create a small reference file instead of copying the entire PDF
+        try {
+            if ($this->isPdftkAvailable()) {
+                // Use pdftk to extract specific page
+                $command = "pdftk \"{$sourceFile}\" cat {$pageNumber} output \"{$pageFile}\"";
+                exec($command, $output, $returnVar);
+                
+                if ($returnVar !== 0) {
+                    throw new \Exception("Failed to extract page {$pageNumber}");
+                }
+            } else {
+                // Pure PHP approach for environments without pdftk
+                Log::info("Creating page reference without system dependencies", [
+                    'document_hash' => $document->hash,
+                    'page_number' => $pageNumber,
+                    'temp_source_file' => $sourceFile,
+                    'page_path' => $pagePath
+                ]);
+                
+                // Create a minimal reference file
                 $referenceData = json_encode([
                     'type' => 'page_reference',
                     'original_pdf' => $document->file_path,
@@ -142,21 +148,39 @@ class PageProcessingService implements PageProcessingServiceInterface
                 ]);
                 file_put_contents($pageFile . '.ref', $referenceData);
                 
-                // For compatibility, create a symbolic copy of the original file
-                // This is much more efficient than extracting individual pages
-                copy($sourceFile, $pageFile);
-                
-                Log::info("Created page reference and copy", [
-                    'page_file' => $pageFile,
-                    'reference_file' => $pageFile . '.ref',
-                    'size' => filesize($pageFile)
-                ]);
-            } else {
-                throw new \Exception("Source PDF file not found: {$sourceFile}");
+                // For compatibility, create a copy in temp location
+                if (file_exists($sourceFile)) {
+                    copy($sourceFile, $pageFile);
+                    
+                    Log::info("Created page reference and temp copy", [
+                        'page_file' => $pageFile,
+                        'reference_file' => $pageFile . '.ref',
+                        'size' => filesize($pageFile)
+                    ]);
+                } else {
+                    throw new \Exception("Source PDF file not found: {$sourceFile}");
+                }
+            }
+
+            // Upload processed page file to storage if using S3
+            if ($this->isS3Disk($disk) && file_exists($pageFile)) {
+                $pageContent = file_get_contents($pageFile);
+                $disk->put($pagePath, $pageContent);
+            }
+
+            return $pagePath;
+        } finally {
+            // Always clean up temp files
+            if (file_exists($sourceFile)) {
+                unlink($sourceFile);
+            }
+            if (file_exists($pageFile)) {
+                unlink($pageFile);
+            }
+            if (file_exists($pageFile . '.ref')) {
+                unlink($pageFile . '.ref');
             }
         }
-
-        return $pagePath;
     }
 
     /**
@@ -539,10 +563,18 @@ class PageProcessingService implements PageProcessingServiceInterface
     }
 
     /**
-     * Get storage disk
+     * Get storage disk - now uses dedicated PDF S3 configuration if available
      */
     protected function getStorageDisk()
     {
+        // Check if PDF viewer has its own S3 configuration
+        $pdfAwsConfig = config('pdf-viewer.storage.aws');
+        
+        if ($this->hasPdfViewerS3Config($pdfAwsConfig)) {
+            return $this->createPdfViewerS3Disk($pdfAwsConfig);
+        }
+        
+        // Fall back to default configured disk
         return Storage::disk(config('pdf-viewer.storage.disk'));
     }
 
@@ -639,5 +671,157 @@ class PageProcessingService implements PageProcessingServiceInterface
             ]);
             return false;
         }
+    }
+
+    /**
+     * Check if PDF viewer has its own S3 configuration
+     */
+    protected function hasPdfViewerS3Config(array $config): bool
+    {
+        return !empty($config['key']) && 
+               !empty($config['secret']) && 
+               !empty($config['region']) && 
+               !empty($config['bucket']);
+    }
+
+    /**
+     * Create dedicated PDF viewer S3 disk
+     */
+    protected function createPdfViewerS3Disk(array $awsConfig): FilesystemAdapter
+    {
+        $s3Client = new S3Client([
+            'credentials' => [
+                'key' => $awsConfig['key'],
+                'secret' => $awsConfig['secret'],
+            ],
+            'region' => $awsConfig['region'],
+            'version' => 'latest',
+            'use_path_style_endpoint' => $awsConfig['use_path_style_endpoint'] ?? false,
+        ]);
+
+        $adapter = new AwsS3V3Adapter(
+            $s3Client,
+            $awsConfig['bucket']
+        );
+
+        $filesystem = new Filesystem($adapter);
+
+        return new FilesystemAdapter($filesystem, $adapter, [
+            'driver' => 's3',
+            'key' => $awsConfig['key'],
+            'secret' => $awsConfig['secret'],
+            'region' => $awsConfig['region'],
+            'bucket' => $awsConfig['bucket'],
+        ]);
+    }
+
+    /**
+     * Generate signed URL for PDF file
+     */
+    public function generateSignedUrl(string $filePath, int $expires = null): string
+    {
+        $disk = $this->getStorageDisk();
+        
+        if (!$this->isS3Disk($disk)) {
+            throw new \Exception('Signed URLs are only available for S3 storage');
+        }
+
+        $expires = $expires ?: config('pdf-viewer.storage.signed_url_expires', 3600);
+        
+        return $disk->temporaryUrl($filePath, now()->addSeconds($expires));
+    }
+
+    /**
+     * Generate signed URL for document
+     */
+    public function generateDocumentSignedUrl(PdfDocument $document, int $expires = null): string
+    {
+        return $this->generateSignedUrl($document->file_path, $expires);
+    }
+
+    /**
+     * Generate signed URL for page
+     */
+    public function generatePageSignedUrl(string $documentHash, int $pageNumber, int $expires = null): string
+    {
+        $pageFilePath = $this->getPageFilePath($documentHash, $pageNumber);
+        return $this->generateSignedUrl($pageFilePath, $expires);
+    }
+
+    /**
+     * Generate multiple signed URLs for document pages
+     */
+    public function generatePagesSignedUrls(string $documentHash, array $pageNumbers, int $expires = null): array
+    {
+        $urls = [];
+        
+        foreach ($pageNumbers as $pageNumber) {
+            try {
+                $urls[$pageNumber] = $this->generatePageSignedUrl($documentHash, $pageNumber, $expires);
+            } catch (\Exception $e) {
+                Log::warning('Failed to generate signed URL for page', [
+                    'document_hash' => $documentHash,
+                    'page_number' => $pageNumber,
+                    'error' => $e->getMessage(),
+                ]);
+                $urls[$pageNumber] = null;
+            }
+        }
+        
+        return $urls;
+    }
+
+    /**
+     * Get the PDF viewer S3 client for advanced operations
+     */
+    protected function getPdfViewerS3Client(): ?S3Client
+    {
+        $pdfAwsConfig = config('pdf-viewer.storage.aws');
+        
+        if (!$this->hasPdfViewerS3Config($pdfAwsConfig)) {
+            return null;
+        }
+
+        return new S3Client([
+            'credentials' => [
+                'key' => $pdfAwsConfig['key'],
+                'secret' => $pdfAwsConfig['secret'],
+            ],
+            'region' => $pdfAwsConfig['region'],
+            'version' => 'latest',
+            'use_path_style_endpoint' => $pdfAwsConfig['use_path_style_endpoint'] ?? false,
+        ]);
+    }
+
+    /**
+     * Generate pre-signed POST data for direct uploads to PDF S3 bucket
+     */
+    public function generatePresignedPost(string $filePath, array $conditions = [], int $expires = null): array
+    {
+        $s3Client = $this->getPdfViewerS3Client();
+        
+        if (!$s3Client) {
+            throw new \Exception('PDF viewer S3 configuration not available');
+        }
+
+        $bucket = config('pdf-viewer.storage.aws.bucket');
+        $expires = $expires ?: config('pdf-viewer.storage.signed_url_expires', 3600);
+
+        $defaultConditions = [
+            ['bucket' => $bucket],
+            ['starts-with', '$key', dirname($filePath) . '/'],
+            ['content-length-range', 1, config('pdf-viewer.processing.max_file_size', 104857600)],
+        ];
+
+        $allConditions = array_merge($defaultConditions, $conditions);
+
+        $postObject = $s3Client->createPresignedPost([
+            'Bucket' => $bucket,
+            'Key' => $filePath,
+            'Conditions' => $allConditions,
+            'Expires' => $expires,
+        ]);
+
+        return $postObject;
     }
 }
