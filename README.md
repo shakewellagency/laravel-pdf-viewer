@@ -16,14 +16,23 @@ A comprehensive Laravel package for handling massive PDF documents with page-by-
 - 🔗 **Mozilla PDF.js integration** ready
 - ☁️ **Laravel Vapor compatible** with S3 storage and serverless deployment
 - 🏗️ **Flexible storage** supporting local, S3, and other Laravel filesystem drivers
+- 🔧 **Pure PHP fallbacks** - No external dependencies required
+- 📝 **Smart text extraction** with page-aware parsing and UTF-8 validation
+- 🛡️ **Robust error handling** with intelligent fallback mechanisms
 
 ## Requirements
 
-- PHP 8.1+
-- Laravel 11.9+
+- PHP 8.2+
+- Laravel 11.0+
 - MySQL 5.7+ (with FULLTEXT search support)
 - Redis (recommended for caching)
 - Queue driver (Redis/Database recommended)
+
+### System Dependencies (Optional)
+- **pdftk** (preferred for PDF splitting and page extraction)
+- **ImageMagick** or **GD** (for thumbnail generation)
+
+**Note**: The package includes pure PHP fallbacks for all system dependencies, so external tools are optional but recommended for better performance.
 
 ### For S3/Laravel Vapor Support
 
@@ -97,6 +106,45 @@ PDF_VIEWER_THUMBNAILS_ENABLED=true
 PDF_VIEWER_THUMBNAILS_WIDTH=300
 PDF_VIEWER_THUMBNAILS_HEIGHT=400
 PDF_VIEWER_THUMBNAILS_QUALITY=80
+```
+
+## Recent Improvements
+
+### Enhanced Text Extraction (v1.2.0)
+
+The package now features a robust text extraction system with multiple fallback strategies:
+
+#### Primary Text Extraction
+- Uses **smalot/pdfparser** for pure PHP text extraction
+- Page-aware parsing that extracts text from specific pages
+- Direct extraction from original PDF files (no temporary files required)
+- Full UTF-8 support with proper encoding validation
+
+#### Intelligent Fallback System
+1. **PDF Page Extraction**: Uses `pdftk` when available for page splitting
+2. **Pure PHP Fallback**: When `pdftk` is unavailable, creates reference files and extracts directly
+3. **Smart Reference System**: Maintains page mapping for accurate text extraction
+4. **Error Recovery**: Continues processing even when individual pages fail
+
+#### Search Integration
+- Automatic indexing of extracted text content
+- Full-text search with MySQL FULLTEXT indexes
+- Search snippets with highlighted terms
+- Relevance scoring for better search results
+
+```php
+// Text extraction happens automatically during processing
+$document = $documentService->upload($uploadedFile);
+
+// Search becomes available once processing is complete
+$results = $searchService->searchDocuments('important safety procedures');
+
+foreach ($results as $document) {
+    echo "Relevance: {$document->relevance_score}\n";
+    foreach ($document->search_snippets as $snippet) {
+        echo "Page {$snippet['page_number']}: {$snippet['snippet']}\n";
+    }
+}
 ```
 
 ## Usage
@@ -273,16 +321,17 @@ The package uses a 3-stage job processing system for maximum parallelization:
 - Dispatches ProcessPageTextJob for each page
 - Handles processing completion and error states
 
-### 2. ProcessPageTextJob
-- Extracts text content from individual pages using Poppler/pdftotext
-- Processes and cleans extracted text
-- Dispatches ExtractPageJob for thumbnail generation
-- Updates page processing status
+### 2. ExtractPageJob
+- Extracts individual pages from PDF using pdftk (with pure PHP fallback)
+- Creates individual page files for text extraction
+- Generates high-quality thumbnails using ImageMagick or GD
+- Dispatches ProcessPageTextJob for text processing
 
-### 3. ExtractPageJob
-- Generates high-quality thumbnails using ImageMagick
-- Creates multiple thumbnail sizes if configured
-- Handles image optimization and compression
+### 3. ProcessPageTextJob
+- Extracts text content using smalot/pdfparser (pure PHP solution)
+- Implements page-aware text extraction directly from original PDF
+- Processes and cleans extracted text with UTF-8 validation
+- Indexes content for full-text search
 - Updates final page completion status
 
 ### Queue Configuration
@@ -305,28 +354,57 @@ PDF_VIEWER_JOB_CONNECTION=redis
 
 - **Automatic Retries**: Jobs automatically retry up to 3 times with exponential backoff
 - **Dead Letter Queue**: Failed jobs are logged for manual inspection
-- **Progressive Fallbacks**: Graceful degradation when external tools fail
+- **Progressive Fallbacks**: Graceful degradation when external tools fail (pdftk → pure PHP fallback)
+- **Smart Text Extraction**: Direct extraction from original PDFs when page files are unavailable
 - **Status Tracking**: Real-time processing status updates
+- **Comprehensive Logging**: Detailed error logging with context for debugging
 
 ## Testing
 
-The package includes a comprehensive test suite covering:
+The package includes a comprehensive test suite covering all functionality:
 
-- **Unit Tests**: Core service functionality and edge cases
+### Test Coverage
+- **Unit Tests**: Core service functionality with 25+ test methods per service
+  - PageProcessingService: Text extraction, page validation, UTF-8 handling
+  - SearchService: Full-text search, snippets, indexing, caching
+  - Job Classes: ProcessDocumentJob, ExtractPageJob, ProcessPageTextJob
 - **Feature Tests**: Complete API endpoint testing
 - **Integration Tests**: Database interactions and job processing
 - **Performance Tests**: Large document handling capabilities
 
+### Test Features
+- **Mock Services**: Comprehensive mocking of external dependencies
+- **Database Testing**: RefreshDatabase trait for isolated test runs
+- **File System Testing**: Storage::fake() for file operation testing
+- **Job Testing**: Bus::fake() for queue job verification
+- **Logging Testing**: Log::spy() for logging verification
+- **Error Scenarios**: Exception handling and failure recovery testing
+
 ```bash
 # Run all tests
-composer test
+vendor/bin/phpunit
 
 # Run with coverage
-composer test:coverage
+vendor/bin/phpunit --coverage-html coverage
 
 # Run specific test suites
-composer test:unit
-composer test:feature
+vendor/bin/phpunit tests/Unit/Services/
+vendor/bin/phpunit tests/Unit/Jobs/
+```
+
+### Test Structure
+```
+tests/
+├── Unit/
+│   ├── Services/
+│   │   ├── PageProcessingServiceTest.php (20+ methods)
+│   │   └── SearchServiceTest.php (25+ methods)
+│   └── Jobs/
+│       ├── ProcessDocumentJobTest.php (15+ methods)
+│       ├── ExtractPageJobTest.php (15+ methods)
+│       └── ProcessPageTextJobTest.php (15+ methods)
+└── Feature/
+    └── [API endpoint tests]
 ```
 
 ## Performance Considerations

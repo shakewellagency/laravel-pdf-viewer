@@ -5,19 +5,21 @@ namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Services;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
-use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
+use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
+use Shakewellagency\LaravelPdfViewer\Exceptions\DocumentNotFoundException;
+use Shakewellagency\LaravelPdfViewer\Exceptions\InvalidFileTypeException;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Services\DocumentService;
 use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
-use Shakewellagency\LaravelPdfViewer\Exceptions\DocumentNotFoundException;
-use Shakewellagency\LaravelPdfViewer\Exceptions\InvalidFileTypeException;
 
 class DocumentServiceTest extends TestCase
 {
     protected DocumentService $documentService;
+
     protected $processingServiceMock;
+
     protected $cacheServiceMock;
 
     protected function setUp(): void
@@ -66,7 +68,7 @@ class DocumentServiceTest extends TestCase
     {
         // Create a file larger than the configured limit
         config(['pdf-viewer.processing.max_file_size' => 1024]); // 1KB limit
-        
+
         $file = UploadedFile::fake()->create('large.pdf', 2048); // 2KB file
         $file = $file->mimeType('application/pdf');
 
@@ -204,7 +206,7 @@ class DocumentServiceTest extends TestCase
         $result = $this->documentService->updateMetadata($document->hash, $updateData);
 
         $this->assertTrue($result);
-        
+
         $document->refresh();
         $this->assertEquals('Updated Title', $document->title);
         $this->assertEquals(['author' => 'Original Author', 'subject' => 'Updated Subject'], $document->metadata);

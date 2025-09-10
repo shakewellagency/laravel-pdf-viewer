@@ -36,7 +36,9 @@ Thumbs.db
 # PHPUnit
 /.phpunit.cache
 /coverage
+/coverage-*
 /tests/coverage
+bootstrap.php
 
 # Composer
 composer.phar
@@ -80,6 +82,8 @@ composer.lock
 /tests/storage
 /tests/temp
 /SamplePDF/*.pdf
+*Debug*Test.php
+*DebugTest.php
 
 # Development tools
 .phpcs-cache

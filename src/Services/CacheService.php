@@ -240,14 +240,6 @@ class CacheService implements CacheServiceInterface
                             'page' => $i,
                         ]);
                     }
-                } else {
-                    // Document not found in DB, try to clear common page cache keys (up to 100 pages)
-                    for ($i = 1; $i <= 100; $i++) {
-                        $patterns[] = $this->generateCacheKey('page_content', [
-                            'hash' => $documentHash,
-                            'page' => $i,
-                        ]);
-                    }
                 }
 
                 foreach ($patterns as $key) {
@@ -364,8 +356,8 @@ class CacheService implements CacheServiceInterface
             'cache_store' => $this->cacheStore,
             'tags_supported' => $this->supportsTags(),
             'prefix' => $this->prefix,
-            'total_keys' => 0, // Placeholder for testing - real implementation would query cache store
-            'memory_usage' => 0, // Placeholder for testing - real implementation would query cache store
+            'total_keys' => 0, // Placeholder - would need cache driver specific implementation
+            'memory_usage' => 0, // Placeholder - would need cache driver specific implementation
         ];
     }
 

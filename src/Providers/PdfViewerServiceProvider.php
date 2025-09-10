@@ -5,6 +5,7 @@ namespace Shakewellagency\LaravelPdfViewer\Providers;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Database\Eloquent\Factories\Factory;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
@@ -62,8 +63,28 @@ class PdfViewerServiceProvider extends ServiceProvider
         // Load migrations
         $this->loadMigrationsFrom(__DIR__ . '/../../database/migrations');
 
+        // Configure factory discovery for package models
+        $this->configureFactories();
+
         // Register routes
         $this->registerRoutes();
+    }
+
+    /**
+     * Configure factory discovery for package models.
+     */
+    protected function configureFactories(): void
+    {
+        if ($this->app->environment('testing')) {
+            Factory::guessFactoryNamesUsing(function (string $modelName) {
+                if (str_starts_with($modelName, 'Shakewellagency\\LaravelPdfViewer\\Models\\')) {
+                    $modelName = str_replace('Shakewellagency\\LaravelPdfViewer\\Models\\', '', $modelName);
+                    return 'Shakewellagency\\LaravelPdfViewer\\Database\\Factories\\' . $modelName . 'Factory';
+                }
+                
+                return null; // Use Laravel's default guessing for other models
+            });
+        }
     }
 
     /**

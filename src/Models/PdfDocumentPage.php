@@ -7,8 +7,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
-// use Laravel\Scout\Searchable; // Optional dependency
+use Laravel\Scout\Searchable;
+use Shakewellagency\LaravelPdfViewer\Database\Factories\PdfDocumentPageFactory;
 
 class PdfDocumentPage extends Model
 {
@@ -17,7 +19,6 @@ class PdfDocumentPage extends Model
     protected $fillable = [
         'pdf_document_id',
         'page_number',
-        'content',
         'page_file_path',
         'thumbnail_path',
         'status',
@@ -56,7 +57,7 @@ class PdfDocumentPage extends Model
             'document_hash' => $this->document->hash ?? null,
             'document_title' => $this->document->title ?? null,
             'page_number' => $this->page_number,
-            'content' => $this->content,
+            'content' => $this->content ? $this->content->content : '',
         ];
     }
 
@@ -65,8 +66,9 @@ class PdfDocumentPage extends Model
      */
     public function shouldBeSearchable(): bool
     {
+        $hasContent = $this->content && !empty(trim($this->content->content ?? ''));
         return $this->is_parsed && 
-               !empty($this->content) && 
+               $hasContent && 
                $this->status === 'completed' &&
                optional($this->document)->is_searchable;
     }
@@ -80,15 +82,25 @@ class PdfDocumentPage extends Model
     }
 
     /**
+     * Get the page content (stored in separate table for performance)
+     */
+    public function content(): HasOne
+    {
+        return $this->hasOne(PdfPageContent::class, 'page_id');
+    }
+
+    /**
      * Get content snippet around search term
      */
     public function getSearchSnippet(string $query, int $length = 200): string
     {
-        if (empty($this->content) || empty($query)) {
+        $contentText = $this->content ? $this->content->content : '';
+        
+        if (empty($contentText) || empty($query)) {
             return '';
         }
 
-        $content = strip_tags($this->content);
+        $content = strip_tags($contentText);
         $queryPos = stripos($content, $query);
 
         if ($queryPos === false) {
@@ -115,14 +127,16 @@ class PdfDocumentPage extends Model
      */
     public function highlightContent(string $query, string $tag = 'mark'): string
     {
-        if (empty($this->content) || empty($query)) {
-            return $this->content;
+        $contentText = $this->content ? $this->content->content : '';
+        
+        if (empty($contentText) || empty($query)) {
+            return $contentText;
         }
 
         return preg_replace(
             '/(' . preg_quote($query, '/') . ')/i',
             "<{$tag}>$1</{$tag}>",
-            $this->content
+            $contentText
         );
     }
 
@@ -131,7 +145,8 @@ class PdfDocumentPage extends Model
      */
     public function getContentLengthAttribute(): int
     {
-        return strlen(strip_tags($this->content ?? ''));
+        $contentText = $this->content ? $this->content->content : '';
+        return strlen(strip_tags($contentText));
     }
 
     /**
@@ -139,11 +154,13 @@ class PdfDocumentPage extends Model
      */
     public function getWordCountAttribute(): int
     {
-        if (empty($this->content)) {
+        $contentText = $this->content ? $this->content->content : '';
+        
+        if (empty($contentText)) {
             return 0;
         }
 
-        return str_word_count(strip_tags($this->content));
+        return str_word_count(strip_tags($contentText));
     }
 
     /**
@@ -151,7 +168,8 @@ class PdfDocumentPage extends Model
      */
     public function hasContent(): bool
     {
-        return !empty($this->content) && trim($this->content) !== '';
+        $contentText = $this->content ? $this->content->content : '';
+        return !empty($contentText) && trim($contentText) !== '';
     }
 
     /**
@@ -175,7 +193,11 @@ class PdfDocumentPage extends Model
      */
     public function scopeWithContent($query)
     {
-        return $query->whereNotNull('content')->where('content', '!=', '');
+        return $query->whereHas('content', function ($contentQuery) {
+            $contentQuery->whereNotNull('content')
+                        ->where('content', '!=', '')
+                        ->where('content_length', '>', 0);
+        });
     }
 
     /**

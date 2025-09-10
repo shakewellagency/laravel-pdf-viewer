@@ -11,11 +11,13 @@ class PdfDocumentFactory extends Factory
 
     public function definition(): array
     {
+        $originalFilename = $this->faker->word() . '.pdf';
+        
         return [
             'hash' => $this->faker->unique()->sha256(),
             'title' => $this->faker->sentence(3),
-            'filename' => $this->faker->word() . '.pdf',
-            'original_filename' => $this->faker->word() . '.pdf',
+            'filename' => $originalFilename,
+            'original_filename' => $originalFilename,
             'mime_type' => 'application/pdf',
             'file_path' => 'pdf-documents/' . $this->faker->uuid() . '.pdf',
             'file_size' => $this->faker->numberBetween(100000, 10000000), // 100KB - 10MB
@@ -31,7 +33,6 @@ class PdfDocumentFactory extends Factory
             'processing_started_at' => $this->faker->optional(0.7)->dateTimeBetween('-1 week', 'now'),
             'processing_completed_at' => $this->faker->optional(0.5)->dateTimeBetween('-1 week', 'now'),
             'processing_error' => $this->faker->optional(0.1)->sentence(),
-            'created_by' => $this->faker->optional(0.5)->uuid(),
             'created_at' => $this->faker->dateTimeBetween('-1 month', 'now'),
             'updated_at' => $this->faker->dateTimeBetween('-1 month', 'now'),
         ];
@@ -91,6 +92,8 @@ class PdfDocumentFactory extends Factory
 
     public function aviation(): static
     {
+        $aviationFilename = 'aviation_' . $this->faker->word() . '.pdf';
+        
         return $this->state(fn (array $attributes) => [
             'title' => $this->faker->randomElement([
                 'Aviation Safety Manual',
@@ -99,8 +102,8 @@ class PdfDocumentFactory extends Factory
                 'Aviation Regulations Guide',
                 'Emergency Procedures Manual',
             ]),
-            'filename' => 'aviation_' . $this->faker->word() . '.pdf',
-            'original_filename' => 'aviation_' . $this->faker->word() . '.pdf',
+            'filename' => $aviationFilename,
+            'original_filename' => $aviationFilename,
             'metadata' => [
                 'author' => 'Aviation Authority',
                 'subject' => 'Aviation Safety and Operations',

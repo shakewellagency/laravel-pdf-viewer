@@ -18,7 +18,6 @@ class PageRetrievalTest extends TestCase
         $page = PdfDocumentPage::factory()->create([
             'pdf_document_id' => $document->id,
             'page_number' => 1,
-            'content' => 'This is the content of page 1',
             'status' => 'completed',
         ]);
 
@@ -26,18 +25,18 @@ class PageRetrievalTest extends TestCase
             ->getJson("/api/pdf-viewer/documents/{$document->hash}/pages/1");
 
         $response->assertStatus(200)
-                 ->assertJsonStructure([
-                     'data' => [
-                         'id',
-                         'page_number',
-                         'content',
-                         'content_length',
-                         'word_count',
-                         'status',
-                         'created_at',
-                         'updated_at',
-                     ],
-                 ]);
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'page_number',
+                    'content',
+                    'content_length',
+                    'word_count',
+                    'status',
+                    'created_at',
+                    'updated_at',
+                ],
+            ]);
 
         $this->assertEquals(1, $response->json('data.page_number'));
         $this->assertEquals('This is the content of page 1', $response->json('data.content'));
@@ -50,9 +49,7 @@ class PageRetrievalTest extends TestCase
             'status' => 'completed',
         ]);
 
-        PdfDocumentPage::factory()->count(3)->sequence(function ($sequence) {
-            return ['page_number' => $sequence->index + 1];
-        })->create([
+        PdfDocumentPage::factory()->count(3)->create([
             'pdf_document_id' => $document->id,
             'status' => 'completed',
         ]);
@@ -61,19 +58,19 @@ class PageRetrievalTest extends TestCase
             ->getJson("/api/pdf-viewer/documents/{$document->hash}/pages");
 
         $response->assertStatus(200)
-                 ->assertJsonStructure([
-                     'data' => [
-                         '*' => [
-                             'id',
-                             'page_number',
-                             'content_length',
-                             'word_count',
-                             'status',
-                         ],
-                     ],
-                     'meta' => ['total', 'per_page'],
-                 ])
-                 ->assertJsonCount(3, 'data');
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'page_number',
+                        'content_length',
+                        'word_count',
+                        'status',
+                    ],
+                ],
+                'meta' => ['total', 'per_page'],
+            ])
+            ->assertJsonCount(3, 'data');
     }
 
     public function test_page_retrieval_requires_authentication(): void
@@ -108,9 +105,9 @@ class PageRetrievalTest extends TestCase
     public function test_can_retrieve_page_thumbnail(): void
     {
         Storage::fake('testing');
-        
+
         $document = PdfDocument::factory()->create();
-        
+
         $page = PdfDocumentPage::factory()->create([
             'pdf_document_id' => $document->id,
             'page_number' => 1,
@@ -133,7 +130,7 @@ class PageRetrievalTest extends TestCase
     public function test_thumbnail_returns_404_when_not_exists(): void
     {
         $document = PdfDocument::factory()->create();
-        
+
         PdfDocumentPage::factory()->create([
             'pdf_document_id' => $document->id,
             'page_number' => 1,
@@ -152,9 +149,7 @@ class PageRetrievalTest extends TestCase
             'page_count' => 25,
         ]);
 
-        PdfDocumentPage::factory()->count(25)->sequence(function ($sequence) {
-            return ['page_number' => $sequence->index + 1];
-        })->create([
+        PdfDocumentPage::factory()->count(25)->create([
             'pdf_document_id' => $document->id,
         ]);
 
@@ -162,9 +157,9 @@ class PageRetrievalTest extends TestCase
             ->getJson("/api/pdf-viewer/documents/{$document->hash}/pages?per_page=10");
 
         $response->assertStatus(200)
-                 ->assertJsonCount(10, 'data')
-                 ->assertJsonPath('meta.per_page', 10)
-                 ->assertJsonPath('meta.total', 25);
+            ->assertJsonCount(10, 'data')
+            ->assertJsonPath('meta.per_page', 10)
+            ->assertJsonPath('meta.total', 25);
     }
 
     public function test_page_list_can_filter_by_status(): void
@@ -187,7 +182,7 @@ class PageRetrievalTest extends TestCase
             ->getJson("/api/pdf-viewer/documents/{$document->hash}/pages?status=completed");
 
         $response->assertStatus(200)
-                 ->assertJsonCount(1, 'data');
+            ->assertJsonCount(1, 'data');
 
         $this->assertEquals('completed', $response->json('data.0.status'));
     }
@@ -208,6 +203,6 @@ class PageRetrievalTest extends TestCase
             ->getJson("/api/pdf-viewer/documents/{$document->hash}/pages/1");
 
         $response->assertStatus(200)
-                 ->assertJsonPath('data.status', 'processing');
+            ->assertJsonPath('data.status', 'processing');
     }
 }
