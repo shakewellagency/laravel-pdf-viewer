@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Laravel\Scout\Searchable;
@@ -13,21 +14,19 @@ use Shakewellagency\LaravelPdfViewer\Database\Factories\PdfDocumentPageFactory;
 
 class PdfDocumentPage extends Model
 {
-    use HasFactory, HasUuids, SoftDeletes, Searchable;
+    use HasFactory, HasUuids, SoftDeletes; // Searchable trait removed for now
 
     protected $fillable = [
         'pdf_document_id',
         'page_number',
         'page_file_path',
         'thumbnail_path',
-        'metadata',
         'status',
         'processing_error',
         'is_parsed',
     ];
 
     protected $casts = [
-        'metadata' => 'array',
         'page_number' => 'integer',
         'is_parsed' => 'boolean',
         'created_at' => 'datetime',
@@ -41,14 +40,22 @@ class PdfDocumentPage extends Model
     ];
 
     /**
+     * Create a new factory instance for the model.
+     */
+    protected static function newFactory()
+    {
+        return \Shakewellagency\LaravelPdfViewer\Database\Factories\PdfDocumentPageFactory::new();
+    }
+
+    /**
      * Get the indexable data array for the model (Scout/Search)
      */
     public function toSearchableArray(): array
     {
         return [
             'id' => $this->id,
-            'document_hash' => $this->document->hash,
-            'document_title' => $this->document->title,
+            'document_hash' => $this->document->hash ?? null,
+            'document_title' => $this->document->title ?? null,
             'page_number' => $this->page_number,
             'content' => $this->content ? $this->content->content : '',
         ];
@@ -63,7 +70,7 @@ class PdfDocumentPage extends Model
         return $this->is_parsed && 
                $hasContent && 
                $this->status === 'completed' &&
-               $this->document->is_searchable;
+               optional($this->document)->is_searchable;
     }
 
     /**
@@ -220,10 +227,43 @@ class PdfDocumentPage extends Model
     }
 
     /**
-     * Create a new factory instance for the model.
+     * Get page metadata
      */
-    protected static function newFactory()
+    public function metadata(): HasMany
     {
-        return PdfDocumentPageFactory::new();
+        return $this->hasMany(PdfPageMetadata::class);
+    }
+
+    /**
+     * Get a specific metadata value by key
+     */
+    public function getMetadata(string $key, $default = null)
+    {
+        $metadata = $this->metadata()->where('key', $key)->first();
+        return $metadata ? $metadata->typed_value : $default;
+    }
+
+    /**
+     * Set a metadata value by key
+     */
+    public function setMetadata(string $key, $value): PdfPageMetadata
+    {
+        $metadata = $this->metadata()->updateOrCreate(
+            ['key' => $key],
+            []
+        );
+        
+        $metadata->setTypedValue($value);
+        $metadata->save();
+        
+        return $metadata;
+    }
+
+    /**
+     * Get all metadata as associative array
+     */
+    public function getAllMetadata(): array
+    {
+        return $this->metadata->pluck('typed_value', 'key')->toArray();
     }
 }

@@ -9,7 +9,7 @@ class DocumentResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        return [
+        $data = [
             'id' => $this->id,
             'hash' => $this->hash,
             'title' => $this->title,
@@ -20,14 +20,6 @@ class DocumentResource extends JsonResource
             'page_count' => $this->page_count,
             'status' => $this->status,
             'is_searchable' => $this->is_searchable,
-            'processing_progress' => $this->when(
-                in_array($this->status, ['processing', 'failed']),
-                $this->processing_progress
-            ),
-            'processing_error' => $this->when(
-                $this->status === 'failed',
-                $this->processing_error
-            ),
             'processing_started_at' => $this->processing_started_at?->toISOString(),
             'processing_completed_at' => $this->processing_completed_at?->toISOString(),
             'metadata' => $this->metadata,
@@ -35,5 +27,15 @@ class DocumentResource extends JsonResource
             'created_at' => $this->created_at->toISOString(),
             'updated_at' => $this->updated_at->toISOString(),
         ];
+
+        if (in_array($this->status, ['processing', 'failed'])) {
+            $data['processing_progress'] = $this->processing_progress;
+        }
+
+        if ($this->status === 'failed') {
+            $data['processing_error'] = $this->processing_error;
+        }
+
+        return $data;
     }
 }

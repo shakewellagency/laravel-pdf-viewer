@@ -2,6 +2,7 @@
 
 namespace Shakewellagency\LaravelPdfViewer\Models;
 
+use Carbon\CarbonInterval;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -23,8 +24,6 @@ class PdfDocument extends Model
         'file_path',
         'page_count',
         'status',
-        'metadata',
-        'processing_progress',
         'processing_error',
         'processing_started_at',
         'processing_completed_at',
@@ -33,8 +32,6 @@ class PdfDocument extends Model
     ];
 
     protected $casts = [
-        'metadata' => 'array',
-        'processing_progress' => 'array',
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
         'is_searchable' => 'boolean',
@@ -48,6 +45,14 @@ class PdfDocument extends Model
     protected $hidden = [
         'file_path', // Hide internal file path from API responses
     ];
+
+    /**
+     * Create a new factory instance for the model.
+     */
+    protected static function newFactory()
+    {
+        return \Shakewellagency\LaravelPdfViewer\Database\Factories\PdfDocumentFactory::new();
+    }
 
     /**
      * Boot the model and set up event handlers
@@ -152,6 +157,59 @@ class PdfDocument extends Model
     }
 
     /**
+     * Get file size in megabytes
+     */
+    public function getFileSizeInMbAttribute(): float
+    {
+        return round($this->file_size / 1024 / 1024, 2);
+    }
+
+    /**
+     * Check if document is currently processing
+     */
+    public function isProcessing(): bool
+    {
+        return $this->status === 'processing';
+    }
+
+    /**
+     * Check if document processing is completed
+     */
+    public function isCompleted(): bool
+    {
+        return $this->status === 'completed';
+    }
+
+    /**
+     * Check if document processing has failed
+     */
+    public function hasFailed(): bool
+    {
+        return $this->status === 'failed';
+    }
+
+    /**
+     * Get progress percentage
+     */
+    public function getProgressPercentage(): float
+    {
+        return $this->getProcessingProgress();
+    }
+
+    /**
+     * Get processing time duration
+     */
+    public function getProcessingTime(): ?CarbonInterval
+    {
+        if (!$this->processing_started_at) {
+            return null;
+        }
+
+        $endTime = $this->processing_completed_at ?? now();
+        return $this->processing_started_at->diffAsCarbonInterval($endTime);
+    }
+
+    /**
      * Scope for searchable documents
      */
     public function scopeSearchable($query)
@@ -184,10 +242,78 @@ class PdfDocument extends Model
     }
 
     /**
-     * Create a new factory instance for the model.
+     * Get document metadata
      */
-    protected static function newFactory()
+    public function metadata(): HasMany
     {
-        return PdfDocumentFactory::new();
+        return $this->hasMany(PdfDocumentMetadata::class);
+    }
+
+    /**
+     * Get processing steps for this document
+     */
+    public function processingSteps(): HasMany
+    {
+        return $this->hasMany(PdfDocumentProcessingStep::class);
+    }
+
+    /**
+     * Get cross references for this document
+     */
+    public function crossReferences(): HasMany
+    {
+        return $this->hasMany(PdfCrossReference::class, 'document_hash', 'hash');
+    }
+
+    /**
+     * Get a specific metadata value by key
+     */
+    public function getMetadata(string $key, $default = null)
+    {
+        $metadata = $this->metadata()->where('key', $key)->first();
+        return $metadata ? $metadata->typed_value : $default;
+    }
+
+    /**
+     * Set a metadata value by key
+     */
+    public function setMetadata(string $key, $value): PdfDocumentMetadata
+    {
+        $metadata = $this->metadata()->updateOrCreate(
+            ['key' => $key],
+            []
+        );
+        
+        $metadata->setTypedValue($value);
+        $metadata->save();
+        
+        return $metadata;
+    }
+
+    /**
+     * Get all metadata as associative array
+     */
+    public function getAllMetadata(): array
+    {
+        return $this->metadata->pluck('typed_value', 'key')->toArray();
+    }
+
+    /**
+     * Get processing step by name
+     */
+    public function getProcessingStep(string $stepName): ?PdfDocumentProcessingStep
+    {
+        return $this->processingSteps()->where('step_name', $stepName)->first();
+    }
+
+    /**
+     * Create or update a processing step
+     */
+    public function updateProcessingStep(string $stepName, array $data): PdfDocumentProcessingStep
+    {
+        return $this->processingSteps()->updateOrCreate(
+            ['step_name' => $stepName],
+            $data
+        );
     }
 }

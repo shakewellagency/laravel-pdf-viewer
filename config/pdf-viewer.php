@@ -120,6 +120,87 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Page Extraction Configuration
+    |--------------------------------------------------------------------------
+    */
+    'page_extraction' => [
+        // Font and Resource Management
+        'preserve_fonts' => env('PDF_VIEWER_PRESERVE_FONTS', true),
+        'font_fallback_strategy' => env('PDF_VIEWER_FONT_FALLBACK', 'preserve'), // preserve, substitute, ignore
+        'validate_fonts' => env('PDF_VIEWER_VALIDATE_FONTS', true),
+        'compression' => env('PDF_VIEWER_PAGE_COMPRESSION', true),
+        'optimize_resources' => env('PDF_VIEWER_OPTIMIZE_RESOURCES', true),
+        'resource_strategy' => env('PDF_VIEWER_RESOURCE_STRATEGY', 'smart_copy'), // smart_copy, duplicate_all, minimal
+        
+        // Cross-Reference and Link Handling
+        'preserve_internal_links' => env('PDF_VIEWER_PRESERVE_INTERNAL_LINKS', false),
+        'strip_navigation' => env('PDF_VIEWER_STRIP_NAVIGATION', true),
+        'handle_form_fields' => env('PDF_VIEWER_HANDLE_FORM_FIELDS', 'isolate'), // isolate, preserve, remove
+        'preserve_annotations' => env('PDF_VIEWER_PRESERVE_ANNOTATIONS', 'page_only'), // page_only, all, none
+        
+        // Document Structure
+        'copy_metadata' => env('PDF_VIEWER_COPY_METADATA', 'basic'), // basic, full, none
+        'handle_javascript' => env('PDF_VIEWER_HANDLE_JAVASCRIPT', 'remove'), // remove, preserve, isolate
+        'rotation_handling' => env('PDF_VIEWER_ROTATION_HANDLING', 'preserve'), // preserve, normalize, detect
+        
+        // Security and Compatibility
+        'handle_encryption' => env('PDF_VIEWER_HANDLE_ENCRYPTION', true),
+        'linearization_check' => env('PDF_VIEWER_LINEARIZATION_CHECK', true),
+        'incremental_update_detection' => env('PDF_VIEWER_INCREMENTAL_UPDATE_DETECTION', true),
+        'max_resource_size' => env('PDF_VIEWER_MAX_RESOURCE_SIZE', 10485760), // 10MB per page
+        
+        // Edge Case Handling
+        'detect_portfolio_pdfs' => env('PDF_VIEWER_DETECT_PORTFOLIO', true),
+        'handle_form_calculations' => env('PDF_VIEWER_HANDLE_FORM_CALC', 'isolate'), // isolate, preserve, remove
+        'detect_spread_layouts' => env('PDF_VIEWER_DETECT_SPREADS', true),
+        'preserve_embedded_files' => env('PDF_VIEWER_PRESERVE_EMBEDDED', 'document_level'), // document_level, duplicate, remove
+        'handle_color_separations' => env('PDF_VIEWER_HANDLE_COLOR_SEP', 'preserve'), // preserve, flatten, detect
+        
+        // Performance & Recovery
+        'chunk_processing' => env('PDF_VIEWER_CHUNK_PROCESSING', true),
+        'chunk_size' => env('PDF_VIEWER_CHUNK_SIZE', 100), // pages per chunk
+        'max_processing_time' => env('PDF_VIEWER_MAX_PROCESSING_TIME', 1800), // 30 minutes
+        'enable_resume' => env('PDF_VIEWER_ENABLE_RESUME', true),
+        'performance_monitoring' => env('PDF_VIEWER_PERF_MONITORING', true),
+        
+        // Validation & Integrity
+        'enable_checksums' => env('PDF_VIEWER_ENABLE_CHECKSUMS', true),
+        'validate_page_count' => env('PDF_VIEWER_VALIDATE_PAGE_COUNT', true),
+        'integrity_checks' => env('PDF_VIEWER_INTEGRITY_CHECKS', true),
+        'corruption_detection' => env('PDF_VIEWER_CORRUPTION_DETECTION', true),
+    ],
+    
+    /*
+    |--------------------------------------------------------------------------
+    | Legal & Compliance Configuration
+    |--------------------------------------------------------------------------
+    */
+    'compliance' => [
+        'audit_trail' => env('PDF_VIEWER_AUDIT_TRAIL', true),
+        'preserve_original' => env('PDF_VIEWER_PRESERVE_ORIGINAL', true),
+        'retention_policy' => env('PDF_VIEWER_RETENTION_DAYS', 2555), // 7 years default
+        'compliance_flags' => env('PDF_VIEWER_COMPLIANCE_FLAGS', 'GDPR,HIPAA,SOX'), // Comma-separated
+        'require_extraction_reason' => env('PDF_VIEWER_REQUIRE_REASON', false),
+        'log_user_actions' => env('PDF_VIEWER_LOG_USER_ACTIONS', true),
+        'enable_data_lineage' => env('PDF_VIEWER_DATA_LINEAGE', true),
+    ],
+    
+    /*
+    |--------------------------------------------------------------------------
+    | File Naming & Organization
+    |--------------------------------------------------------------------------
+    */
+    'file_naming' => [
+        'strategy' => env('PDF_VIEWER_NAMING_STRATEGY', 'hierarchical'), // hierarchical, flat, hybrid
+        'include_timestamp' => env('PDF_VIEWER_INCLUDE_TIMESTAMP', true),
+        'include_checksum' => env('PDF_VIEWER_INCLUDE_CHECKSUM', true),
+        'max_filename_length' => env('PDF_VIEWER_MAX_FILENAME_LENGTH', 200),
+        'forbidden_chars' => env('PDF_VIEWER_FORBIDDEN_CHARS', '<>:"/\\|?*'),
+        'case_handling' => env('PDF_VIEWER_CASE_HANDLING', 'preserve'), // preserve, lower, upper
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Thumbnail Configuration
     |--------------------------------------------------------------------------
     */

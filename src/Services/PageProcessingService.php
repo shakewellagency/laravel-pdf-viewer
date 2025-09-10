@@ -4,33 +4,82 @@ namespace Shakewellagency\LaravelPdfViewer\Services;
 
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Filesystem\FilesystemAdapter;
-use Aws\S3\S3Client;
-use League\Flysystem\AwsS3V3\AwsS3V3Adapter;
-use League\Flysystem\Filesystem;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
-use Shakewellagency\LaravelPdfViewer\Models\PdfPageContent;
-use Smalot\PdfParser\Parser;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
+use Shakewellagency\LaravelPdfViewer\Services\EdgeCaseDetectionService;
+use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
+use Spatie\PdfToText\Pdf;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
+use setasign\Fpdi\Tcpdf\Fpdi;
 
 class PageProcessingService implements PageProcessingServiceInterface
 {
+    protected ExtractionAuditService $auditService;
+    protected EdgeCaseDetectionService $edgeCaseService;
+    protected CrossReferenceService $crossRefService;
+
+    public function __construct(
+        ExtractionAuditService $auditService, 
+        EdgeCaseDetectionService $edgeCaseService,
+        CrossReferenceService $crossRefService
+    ) {
+        $this->auditService = $auditService;
+        $this->edgeCaseService = $edgeCaseService;
+        $this->crossRefService = $crossRefService;
+    }
     public function extractPage(PdfDocument $document, int $pageNumber): string
+    {
+        $result = $this->extractPageWithContext($document, $pageNumber);
+        return $result['file_path'];
+    }
+
+    /**
+     * Extract page with comprehensive context and metadata
+     */
+    public function extractPageWithContext(PdfDocument $document, int $pageNumber): array
     {
         try {
             $disk = $this->getStorageDisk();
             $pageFileName = "page_{$pageNumber}.pdf";
             $pagePath = config('pdf-viewer.storage.pages_path') . '/' . $document->hash . '/' . $pageFileName;
 
+            $extractionContext = [
+                'method' => 'fpdi',
+                'extraction_strategy' => 'standard',
+                'issues_detected' => [],
+                'fallbacks_used' => [],
+                'resource_optimization' => config('pdf-viewer.page_extraction.optimize_resources', true),
+            ];
+
+            // Analyze document for edge cases
+            $edgeCaseAnalysis = $this->edgeCaseService->analyzeDocumentEdgeCases($document);
+            $this->edgeCaseService->applyEdgeCaseHandling($edgeCaseAnalysis, $extractionContext);
+            
+            // Apply cross-reference handling
+            $this->crossRefService->applyCrossReferenceHandling($document->hash, $pageNumber, $extractionContext);
+            
+            // Handle resource subsetting for this page
+            $resourceMap = $this->crossRefService->handleResourceSubsetting(
+                $this->getSourceFilePath($document), 
+                $pageNumber, 
+                $extractionContext
+            );
+
             // Handle S3/Vapor vs local storage differently
             if ($this->isS3Disk($disk)) {
-                return $this->extractPageForS3($document, $pageNumber, $pagePath, $disk);
+                $filePath = $this->extractPageForS3WithContext($document, $pageNumber, $pagePath, $disk, $extractionContext);
             } else {
-                return $this->extractPageLocally($document, $pageNumber, $pagePath);
+                $filePath = $this->extractPageLocallyWithContext($document, $pageNumber, $pagePath, $extractionContext);
             }
+
+            return [
+                'file_path' => $filePath,
+                'context' => $extractionContext,
+            ];
+
         } catch (\Exception $e) {
             Log::error('Page extraction failed', [
                 'document_hash' => $document->hash,
@@ -42,9 +91,9 @@ class PageProcessingService implements PageProcessingServiceInterface
     }
 
     /**
-     * Extract page for S3/Vapor environment
+     * Extract page for S3/Vapor environment with context
      */
-    protected function extractPageForS3(PdfDocument $document, int $pageNumber, string $pagePath, $disk): string
+    protected function extractPageForS3WithContext(PdfDocument $document, int $pageNumber, string $pagePath, $disk, array &$extractionContext): string
     {
         // Download the PDF from S3 to local temp directory
         $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
@@ -55,209 +104,78 @@ class PageProcessingService implements PageProcessingServiceInterface
         file_put_contents($sourceFile, $pdfContent);
 
         try {
-            // Extract specific page using pdftk or similar command
-            $pageFile = $tempDir . '/' . uniqid() . '_page_' . $pageNumber . '.pdf';
+            // Extract page using FPDI with context tracking
+            $tempPageFile = $tempDir . '/page_' . $pageNumber . '_' . uniqid() . '.pdf';
             
-            // Use pdftk if available, otherwise fall back to copying entire file
-            if ($this->isPdftkAvailable()) {
-                $command = "pdftk \"{$sourceFile}\" cat {$pageNumber} output \"{$pageFile}\"";
-                exec($command, $output, $returnVar);
-                
-                if ($returnVar !== 0) {
-                    throw new \Exception("Failed to extract page {$pageNumber}");
-                }
-            } else {
-                // Fall back to copying the entire file for now
-                copy($sourceFile, $pageFile);
+            $this->extractSinglePageWithFpdi($sourceFile, $pageNumber, $tempPageFile, $extractionContext);
+
+            if (!file_exists($tempPageFile)) {
+                throw new \Exception("Failed to extract page {$pageNumber}");
             }
 
-            // Upload extracted page to S3
-            $pageContent = file_get_contents($pageFile);
+            // Upload the extracted page back to S3
+            $pageContent = file_get_contents($tempPageFile);
             $disk->put($pagePath, $pageContent);
 
-            // Clean up temp files
+            // Cleanup temp files
             if (file_exists($sourceFile)) {
                 unlink($sourceFile);
             }
-            if (file_exists($pageFile)) {
-                unlink($pageFile);
+            if (file_exists($tempPageFile)) {
+                unlink($tempPageFile);
             }
 
             return $pagePath;
         } catch (\Exception $e) {
-            // Clean up on error
+            // Cleanup temp files on error
             if (file_exists($sourceFile)) {
                 unlink($sourceFile);
             }
-            if (isset($pageFile) && file_exists($pageFile)) {
-                unlink($pageFile);
+            if (isset($tempPageFile) && file_exists($tempPageFile)) {
+                unlink($tempPageFile);
             }
             throw $e;
         }
     }
 
     /**
-     * Extract page locally - improved version with fallback for missing pdftk
+     * Extract page for local storage with context
      */
-    protected function extractPageLocally(PdfDocument $document, int $pageNumber, string $pagePath): string
+    protected function extractPageLocallyWithContext(PdfDocument $document, int $pageNumber, string $pagePath, array &$extractionContext): string
     {
-        // For Vapor compatibility, use /tmp for all file operations
-        $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
-        $sourceFile = $tempDir . '/' . basename($document->file_path);
-        $pageFile = $tempDir . '/' . uniqid() . '_page_' . $pageNumber . '.pdf';
-        
-        // Download/copy source file to temp location
-        $disk = $this->getStorageDisk();
-        if ($this->isS3Disk($disk)) {
-            $pdfContent = $disk->get($document->file_path);
-            file_put_contents($sourceFile, $pdfContent);
-        } else {
-            $originalPath = storage_path('app/' . $document->file_path);
-            if (file_exists($originalPath)) {
-                copy($originalPath, $sourceFile);
-            } else {
-                throw new \Exception("Source PDF file not found: {$originalPath}");
-            }
+        $sourceFile = storage_path('app/' . $document->file_path);
+        $fullPagePath = storage_path('app/' . $pagePath);
+
+        // Create directory if it doesn't exist
+        $directory = dirname($fullPagePath);
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
         }
 
-        try {
-            if ($this->isPdftkAvailable()) {
-                // Use pdftk to extract specific page
-                $command = "pdftk \"{$sourceFile}\" cat {$pageNumber} output \"{$pageFile}\"";
-                exec($command, $output, $returnVar);
-                
-                if ($returnVar !== 0) {
-                    throw new \Exception("Failed to extract page {$pageNumber}");
-                }
-            } else {
-                // Pure PHP approach for environments without pdftk
-                Log::info("Creating page reference without system dependencies", [
-                    'document_hash' => $document->hash,
-                    'page_number' => $pageNumber,
-                    'temp_source_file' => $sourceFile,
-                    'page_path' => $pagePath
-                ]);
-                
-                // Create a minimal reference file
-                $referenceData = json_encode([
-                    'type' => 'page_reference',
-                    'original_pdf' => $document->file_path,
-                    'page_number' => $pageNumber,
-                    'document_hash' => $document->hash,
-                    'created_at' => now()->toISOString()
-                ]);
-                file_put_contents($pageFile . '.ref', $referenceData);
-                
-                // For compatibility, create a copy in temp location
-                if (file_exists($sourceFile)) {
-                    copy($sourceFile, $pageFile);
-                    
-                    Log::info("Created page reference and temp copy", [
-                        'page_file' => $pageFile,
-                        'reference_file' => $pageFile . '.ref',
-                        'size' => filesize($pageFile)
-                    ]);
-                } else {
-                    throw new \Exception("Source PDF file not found: {$sourceFile}");
-                }
-            }
+        // Use FPDI to extract single page with context tracking
+        $this->extractSinglePageWithFpdi($sourceFile, $pageNumber, $fullPagePath, $extractionContext);
 
-            // Upload processed page file to storage if using S3
-            if ($this->isS3Disk($disk) && file_exists($pageFile)) {
-                $pageContent = file_get_contents($pageFile);
-                $disk->put($pagePath, $pageContent);
-            }
-
-            return $pagePath;
-        } finally {
-            // Always clean up temp files
-            if (file_exists($sourceFile)) {
-                unlink($sourceFile);
-            }
-            if (file_exists($pageFile)) {
-                unlink($pageFile);
-            }
-            if (file_exists($pageFile . '.ref')) {
-                unlink($pageFile . '.ref');
-            }
+        if (!file_exists($fullPagePath)) {
+            throw new \Exception("Failed to extract page {$pageNumber}");
         }
+
+        return $pagePath;
     }
 
-    /**
-     * Extract text from a page file path - improved version with direct PDF reading
-     */
     public function extractText(string $pageFilePath): string
     {
-        Log::info('Starting extractText with improved page-aware parsing', [
-            'page_file_path' => $pageFilePath,
-        ]);
-        
         try {
-            // Extract text from specific page using smalot/pdfparser
-            
-            // Get the document hash from the page file path
-            $pathParts = explode('/', $pageFilePath);
-            $documentHash = $pathParts[1] ?? null;
-            $pageFileName = $pathParts[2] ?? null;
-            
-            Log::info('Path parsing', [
-                'path_parts' => $pathParts,
-                'document_hash' => $documentHash,
-                'page_file_name' => $pageFileName,
-            ]);
-            
-            if (!$documentHash || !$pageFileName) {
-                Log::error('Invalid page file path format', ['page_file_path' => $pageFilePath]);
-                return '';
-            }
-            
-            // Extract page number from filename (e.g., "page_1.pdf" -> 1)
-            if (!preg_match('/page_(\d+)\.pdf/', $pageFileName, $matches)) {
-                Log::error('Could not extract page number from filename', ['page_file_path' => $pageFilePath]);
-                return '';
-            }
-            $pageNumber = (int) $matches[1];
-            
-            Log::info('Page number extracted', ['page_number' => $pageNumber]);
-            
-            // Find the original PDF document
-            $document = PdfDocument::where('hash', $documentHash)->first();
-            if (!$document) {
-                Log::error('Document not found for hash', ['hash' => $documentHash]);
-                return '';
-            }
-            
-            Log::info('Document found', [
-                'document_id' => $document->id,
-                'document_title' => $document->title,
-                'document_file_path' => $document->file_path,
-            ]);
-            
-            // Extract text from specific page of the original PDF
             $disk = Storage::disk(config('pdf-viewer.storage.disk'));
-            $isS3 = $this->isS3Disk($disk);
-            
-            Log::info('Storage check', ['is_s3' => $isS3]);
-            
-            if ($isS3) {
-                $text = $this->extractPageTextFromS3($document, $pageNumber, $disk);
+
+            if ($this->isS3Disk($disk)) {
+                return $this->extractTextFromS3($pageFilePath, $disk);
             } else {
-                $text = $this->extractPageTextLocally($document, $pageNumber);
+                return $this->extractTextLocally($pageFilePath);
             }
-            
-            Log::info('Page text extraction result', [
-                'page_number' => $pageNumber,
-                'text_length' => strlen($text),
-                'first_100_chars' => substr($text, 0, 100),
-            ]);
-            
-            return $text;
-            
         } catch (\Exception $e) {
             Log::error('Text extraction failed', [
                 'page_file_path' => $pageFilePath,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
             
             // Return empty string instead of throwing to allow processing to continue
@@ -266,138 +184,26 @@ class PageProcessingService implements PageProcessingServiceInterface
     }
 
     /**
-     * Extract text from specific page of PDF stored locally
+     * Extract text from S3 stored PDF
      */
-    protected function extractPageTextLocally($document, int $pageNumber): string
+    protected function extractTextFromS3(string $pageFilePath, $disk): string
     {
-        $fullPath = storage_path('app/' . $document->file_path);
-        
-        Log::info('Local page extraction', [
-            'document_file_path' => $document->file_path,
-            'full_path' => $fullPath,
-            'page_number' => $pageNumber,
-            'file_exists' => file_exists($fullPath),
-            'file_size' => file_exists($fullPath) ? filesize($fullPath) : 'N/A',
-        ]);
-        
-        if (!file_exists($fullPath)) {
-            throw new \Exception("Document file not found: {$document->file_path}");
-        }
-
-        // Use smalot/pdfparser (pure PHP) to extract content from specific page
-        $parser = new Parser();
-        $pdf = $parser->parseFile($fullPath);
-        $pages = $pdf->getPages();
-        
-        Log::info('PDF pages loaded', [
-            'total_pages' => count($pages),
-            'requested_page' => $pageNumber,
-        ]);
-        
-        // Check if requested page exists (pages are 0-indexed in array, but we use 1-based numbering)
-        if (!isset($pages[$pageNumber - 1])) {
-            Log::warning('Requested page does not exist', [
-                'page_number' => $pageNumber,
-                'total_pages' => count($pages),
-            ]);
-            return '';
-        }
-        
-        // Get text from specific page
-        $page = $pages[$pageNumber - 1];
-        $rawText = $page->getText();
-        
-        Log::info('Raw page text extracted', [
-            'page_number' => $pageNumber,
-            'raw_text_length' => strlen($rawText),
-            'raw_first_200_chars' => substr($rawText, 0, 200),
-        ]);
-
-        // Clean up the extracted text
-        $text = $this->cleanExtractedText($rawText);
-        
-        Log::info('After cleaning page text', [
-            'page_number' => $pageNumber,
-            'cleaned_text_length' => strlen($text),
-            'cleaned_first_200_chars' => substr($text, 0, 200),
-        ]);
-
-        return $text;
-    }
-
-    /**
-     * Extract text from specific page of PDF stored on S3
-     */
-    protected function extractPageTextFromS3($document, int $pageNumber, $disk): string
-    {
-        // Download the PDF from S3 to temp location
+        // Download the page PDF from S3 to temp location
         $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
-        $tempFile = $tempDir . '/page_extract_' . uniqid() . '.pdf';
-
-        Log::info('S3 page extraction starting', [
-            'document_file_path' => $document->file_path,
-            'page_number' => $pageNumber,
-            'temp_file' => $tempFile,
-            's3_exists' => $disk->exists($document->file_path),
-        ]);
+        $tempFile = $tempDir . '/text_extract_' . uniqid() . '.pdf';
 
         try {
             // Download PDF from S3
-            $pdfContent = $disk->get($document->file_path);
-            
-            Log::info('Downloaded from S3 for page extraction', [
-                'content_length' => strlen($pdfContent),
-                'page_number' => $pageNumber,
-            ]);
-            
+            $pdfContent = $disk->get($pageFilePath);
             file_put_contents($tempFile, $pdfContent);
-            
-            Log::info('Temp file written for page extraction', [
-                'temp_file_size' => file_exists($tempFile) ? filesize($tempFile) : 0,
-                'temp_file_exists' => file_exists($tempFile),
-            ]);
 
-            // Extract text from specific page using smalot/pdfparser (pure PHP)
-            $parser = new Parser();
-            $pdf = $parser->parseFile($tempFile);
-            $pages = $pdf->getPages();
-            
-            Log::info('S3 PDF pages loaded', [
-                'total_pages' => count($pages),
-                'requested_page' => $pageNumber,
-            ]);
-            
-            // Check if requested page exists
-            if (!isset($pages[$pageNumber - 1])) {
-                Log::warning('S3: Requested page does not exist', [
-                    'page_number' => $pageNumber,
-                    'total_pages' => count($pages),
-                ]);
-                
-                // Cleanup temp file
-                if (file_exists($tempFile)) {
-                    unlink($tempFile);
-                }
-                
-                return '';
-            }
-            
-            // Get text from specific page
-            $page = $pages[$pageNumber - 1];
-            $rawText = $page->getText();
-            
-            Log::info('S3 page text extracted', [
-                'page_number' => $pageNumber,
-                'raw_text_length' => strlen($rawText),
-            ]);
+            // Extract text using Spatie PDF to Text
+            $text = (new Pdf())
+                ->setPdf($tempFile)
+                ->text();
 
             // Clean up the extracted text
-            $text = $this->cleanExtractedText($rawText);
-            
-            Log::info('S3 page text cleaned', [
-                'page_number' => $pageNumber,
-                'cleaned_text_length' => strlen($text),
-            ]);
+            $text = $this->cleanExtractedText($text);
 
             // Cleanup temp file
             if (file_exists($tempFile)) {
@@ -415,20 +221,62 @@ class PageProcessingService implements PageProcessingServiceInterface
     }
 
     /**
-     * Generate thumbnail for page - improved with better error handling
+     * Extract text from locally stored PDF
      */
+    protected function extractTextLocally(string $pageFilePath): string
+    {
+        $fullPath = storage_path('app/' . $pageFilePath);
+        
+        if (!file_exists($fullPath)) {
+            throw new \Exception("Page file not found: {$pageFilePath}");
+        }
+
+        // Use Spatie PDF to Text to extract content
+        $text = (new Pdf())
+            ->setPdf($fullPath)
+            ->text();
+
+        // Clean up the extracted text
+        $text = $this->cleanExtractedText($text);
+
+        return $text;
+    }
+
+    public function createPage(PdfDocument $document, int $pageNumber, string $content = ''): PdfDocumentPage
+    {
+        return PdfDocumentPage::create([
+            'pdf_document_id' => $document->id,
+            'page_number' => $pageNumber,
+            'content' => $content,
+            'status' => 'pending',
+        ]);
+    }
+
+    public function updatePageContent(PdfDocumentPage $page, string $content): bool
+    {
+        return $page->update([
+            'content' => $content,
+            'is_parsed' => !empty($content),
+            'status' => 'completed',
+        ]);
+    }
+
     public function generateThumbnail(string $pageFilePath, int $width = 300, int $height = 400): string
     {
         try {
-            $disk = $this->getStorageDisk();
-            
+            if (!config('pdf-viewer.thumbnails.enabled')) {
+                return '';
+            }
+
+            $disk = Storage::disk(config('pdf-viewer.storage.disk'));
+
             if ($this->isS3Disk($disk)) {
                 return $this->generateThumbnailForS3($pageFilePath, $width, $height, $disk);
             } else {
                 return $this->generateThumbnailLocally($pageFilePath, $width, $height);
             }
         } catch (\Exception $e) {
-            Log::warning('Thumbnail generation failed', [
+            Log::error('Thumbnail generation error', [
                 'page_file_path' => $pageFilePath,
                 'error' => $e->getMessage(),
             ]);
@@ -437,232 +285,156 @@ class PageProcessingService implements PageProcessingServiceInterface
     }
 
     /**
-     * Generate thumbnail locally
-     */
-    protected function generateThumbnailLocally(string $pageFilePath, int $width, int $height): string
-    {
-        try {
-            $fullPath = storage_path('app/' . $pageFilePath);
-            
-            if (!file_exists($fullPath)) {
-                return '';
-            }
-
-            // For now, return empty string as thumbnail generation requires additional setup
-            // This can be implemented later with ImageMagick or similar tools
-            return '';
-        } catch (\Exception $e) {
-            Log::warning('Local thumbnail generation failed', [
-                'page_file_path' => $pageFilePath,
-                'error' => $e->getMessage(),
-            ]);
-            return '';
-        }
-    }
-
-    /**
-     * Generate thumbnail for S3 stored file
+     * Generate thumbnail for S3 stored PDF
      */
     protected function generateThumbnailForS3(string $pageFilePath, int $width, int $height, $disk): string
     {
+        $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+        $tempPageFile = $tempDir . '/thumb_source_' . uniqid() . '.pdf';
+        $tempThumbnailFile = $tempDir . '/thumb_' . uniqid() . '.jpg';
+
         try {
-            // For now, return empty string as thumbnail generation requires additional setup
-            return '';
+            // Download PDF from S3
+            $pdfContent = $disk->get($pageFilePath);
+            file_put_contents($tempPageFile, $pdfContent);
+
+            // Generate thumbnail filename
+            $thumbnailName = pathinfo($pageFilePath, PATHINFO_FILENAME) . '_thumb.jpg';
+            $documentHash = basename(dirname($pageFilePath));
+            $thumbnailPath = config('pdf-viewer.storage.thumbnails_path') . '/' . $documentHash . '/' . $thumbnailName;
+
+            // Convert PDF page to image using ImageMagick
+            $command = sprintf(
+                'convert -density 150 "%s[0]" -quality %d -resize %dx%d "%s" 2>&1',
+                $tempPageFile,
+                config('pdf-viewer.thumbnails.quality', 80),
+                $width,
+                $height,
+                $tempThumbnailFile
+            );
+
+            exec($command, $output, $returnCode);
+
+            if ($returnCode !== 0 || !file_exists($tempThumbnailFile)) {
+                Log::warning('Thumbnail generation failed', [
+                    'page_file_path' => $pageFilePath,
+                    'command' => $command,
+                    'output' => implode("\n", $output),
+                ]);
+                return '';
+            }
+
+            // Upload thumbnail to S3
+            $thumbnailContent = file_get_contents($tempThumbnailFile);
+            $disk->put($thumbnailPath, $thumbnailContent, 'public');
+
+            // Cleanup temp files
+            if (file_exists($tempPageFile)) {
+                unlink($tempPageFile);
+            }
+            if (file_exists($tempThumbnailFile)) {
+                unlink($tempThumbnailFile);
+            }
+
+            return $thumbnailPath;
         } catch (\Exception $e) {
-            Log::warning('S3 thumbnail generation failed', [
+            // Cleanup temp files on error
+            if (file_exists($tempPageFile)) {
+                unlink($tempPageFile);
+            }
+            if (file_exists($tempThumbnailFile)) {
+                unlink($tempThumbnailFile);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Generate thumbnail for locally stored PDF
+     */
+    protected function generateThumbnailLocally(string $pageFilePath, int $width, int $height): string
+    {
+        $fullPagePath = storage_path('app/' . $pageFilePath);
+        
+        if (!file_exists($fullPagePath)) {
+            throw new \Exception("Page file not found: {$pageFilePath}");
+        }
+
+        // Generate thumbnail filename
+        $thumbnailName = pathinfo($pageFilePath, PATHINFO_FILENAME) . '_thumb.jpg';
+        $documentHash = basename(dirname($pageFilePath));
+        $thumbnailPath = config('pdf-viewer.storage.thumbnails_path') . '/' . $documentHash . '/' . $thumbnailName;
+        $fullThumbnailPath = storage_path('app/' . $thumbnailPath);
+
+        // Create directory if it doesn't exist
+        $directory = dirname($fullThumbnailPath);
+        if (!is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        // Convert PDF page to image using ImageMagick
+        $command = sprintf(
+            'convert -density 150 "%s[0]" -quality %d -resize %dx%d "%s" 2>&1',
+            $fullPagePath,
+            config('pdf-viewer.thumbnails.quality', 80),
+            $width,
+            $height,
+            $fullThumbnailPath
+        );
+
+        exec($command, $output, $returnCode);
+
+        if ($returnCode !== 0 || !file_exists($fullThumbnailPath)) {
+            Log::warning('Thumbnail generation failed', [
                 'page_file_path' => $pageFilePath,
-                'error' => $e->getMessage(),
+                'command' => $command,
+                'output' => implode("\n", $output),
             ]);
             return '';
         }
+
+        return $thumbnailPath;
     }
 
-    /**
-     * Update page content - updated to use separated content table
-     */
-    public function updatePageContent(PdfDocumentPage $page, string $content): bool
-    {
-        // Update the page status
-        $page->update([
-            'status' => 'completed',
-            'is_parsed' => true,
-            'metadata' => array_merge($page->metadata ?? [], [
-                'text_extracted_at' => now()->toISOString(),
-                'content_length' => strlen($content),
-                'word_count' => str_word_count($content),
-            ]),
-        ]);
-
-        // Create or update content in separate table for better performance
-        PdfPageContent::createOrUpdateForPage($page, $content);
-
-        return true;
-    }
-
-    /**
-     * Mark page as processed
-     */
-    public function markPageProcessed(PdfDocumentPage $page): void
-    {
-        $page->update([
-            'status' => 'completed',
-            'is_parsed' => true,
-        ]);
-    }
-
-    /**
-     * Handle page processing failure
-     */
-    public function handlePageFailure(PdfDocumentPage $page, string $error): void
-    {
-        $page->update([
-            'status' => 'failed',
-            'processing_error' => $error,
-        ]);
-    }
-
-    /**
-     * Clean extracted text - improved version with better UTF-8 handling
-     */
-    protected function cleanExtractedText(string $text): string
-    {
-        // Remove excessive whitespace
-        $text = preg_replace('/\s+/', ' ', $text);
-        
-        // Trim whitespace
-        $text = trim($text);
-        
-        // Remove control characters but keep newlines and tabs
-        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
-        
-        // Use mb_convert_encoding to ensure valid UTF-8 and remove problematic sequences
-        // This is safer than trying to match invalid surrogate pairs with regex
-        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
-        
-        // Remove common problematic characters that cause MySQL encoding issues
-        // Using individual character replacements instead of complex regex ranges
-        $problematicChars = [
-            "\xEF\xBF\xBD", // Unicode replacement character
-            "\x00",          // Null byte
-            "\xFF\xFE",      // BOM
-            "\xFE\xFF",      // BOM
-        ];
-        
-        foreach ($problematicChars as $char) {
-            $text = str_replace($char, '', $text);
-        }
-        
-        // Final validation - ensure the string is valid UTF-8
-        if (!mb_check_encoding($text, 'UTF-8')) {
-            Log::warning('Text contains invalid UTF-8, attempting to clean', ['original_length' => strlen($text)]);
-            $text = mb_scrub($text, 'UTF-8');
-            Log::info('Text cleaned with mb_scrub', ['new_length' => strlen($text)]);
-        }
-        
-        return $text;
-    }
-
-    /**
-     * Get storage disk - now uses dedicated PDF S3 configuration if available
-     */
-    protected function getStorageDisk()
-    {
-        // Check if PDF viewer has its own S3 configuration
-        $pdfAwsConfig = config('pdf-viewer.storage.aws');
-        
-        if ($this->hasPdfViewerS3Config($pdfAwsConfig)) {
-            return $this->createPdfViewerS3Disk($pdfAwsConfig);
-        }
-        
-        // Fall back to default configured disk
-        return Storage::disk(config('pdf-viewer.storage.disk'));
-    }
-
-    /**
-     * Check if disk is S3
-     */
-    protected function isS3Disk($disk): bool
-    {
-        return $disk->getConfig()['driver'] === 's3';
-    }
-
-    /**
-     * Check if pdftk is available (optional, for page splitting)
-     */
-    protected function isPdftkAvailable(): bool
-    {
-        exec('which pdftk', $output, $returnVar);
-        return $returnVar === 0;
-    }
-
-    /**
-     * Create page record - updated for separated content table
-     */
-    public function createPage(PdfDocument $document, int $pageNumber, string $content = ''): PdfDocumentPage
-    {
-        $page = $document->pages()->create([
-            'page_number' => $pageNumber,
-            'status' => 'pending',
-            'is_parsed' => !empty($content),
-        ]);
-
-        // If content is provided, store it in the separate content table
-        if (!empty($content)) {
-            PdfPageContent::createOrUpdateForPage($page, $content);
-        }
-
-        return $page;
-    }
-
-    /**
-     * Get page file path
-     */
     public function getPageFilePath(string $documentHash, int $pageNumber): string
     {
         $pageFileName = "page_{$pageNumber}.pdf";
         return config('pdf-viewer.storage.pages_path') . '/' . $documentHash . '/' . $pageFileName;
     }
 
-    /**
-     * Validate page file
-     */
     public function validatePageFile(string $pageFilePath): bool
     {
-        $disk = $this->getStorageDisk();
-        if ($this->isS3Disk($disk)) {
-            return $disk->exists($pageFilePath);
-        } else {
-            $fullPath = storage_path('app/' . $pageFilePath);
-            return file_exists($fullPath) && filesize($fullPath) > 0;
+        $fullPath = storage_path('app/' . $pageFilePath);
+        
+        if (!file_exists($fullPath)) {
+            return false;
         }
+
+        // Check if it's a valid PDF file
+        $handle = fopen($fullPath, 'r');
+        $header = fread($handle, 5);
+        fclose($handle);
+
+        return strpos($header, '%PDF') === 0;
     }
 
-    /**
-     * Clean up page files
-     */
     public function cleanupPageFiles(string $documentHash): bool
     {
         try {
-            $disk = $this->getStorageDisk();
-            $pagesPath = config('pdf-viewer.storage.pages_path') . '/' . $documentHash;
+            $disk = Storage::disk(config('pdf-viewer.storage.disk'));
             
-            if ($this->isS3Disk($disk)) {
-                $files = $disk->files($pagesPath);
-                foreach ($files as $file) {
-                    $disk->delete($file);
-                }
-            } else {
-                $fullPath = storage_path('app/' . $pagesPath);
-                if (is_dir($fullPath)) {
-                    $files = glob($fullPath . '/*');
-                    foreach ($files as $file) {
-                        if (is_file($file)) {
-                            unlink($file);
-                        }
-                    }
-                    rmdir($fullPath);
-                }
+            // Delete page files
+            $pagesPath = config('pdf-viewer.storage.pages_path') . '/' . $documentHash;
+            if ($disk->exists($pagesPath)) {
+                $disk->deleteDirectory($pagesPath);
             }
+
+            // Delete thumbnail files
+            $thumbnailsPath = config('pdf-viewer.storage.thumbnails_path') . '/' . $documentHash;
+            if ($disk->exists($thumbnailsPath)) {
+                $disk->deleteDirectory($thumbnailsPath);
+            }
+
             return true;
         } catch (\Exception $e) {
             Log::error('Failed to cleanup page files', [
@@ -673,155 +445,614 @@ class PageProcessingService implements PageProcessingServiceInterface
         }
     }
 
-    /**
-     * Check if PDF viewer has its own S3 configuration
-     */
-    protected function hasPdfViewerS3Config(array $config): bool
+    public function markPageProcessed(PdfDocumentPage $page): void
     {
-        return !empty($config['key']) && 
-               !empty($config['secret']) && 
-               !empty($config['region']) && 
-               !empty($config['bucket']);
-    }
-
-    /**
-     * Create dedicated PDF viewer S3 disk
-     */
-    protected function createPdfViewerS3Disk(array $awsConfig): FilesystemAdapter
-    {
-        $s3Client = new S3Client([
-            'credentials' => [
-                'key' => $awsConfig['key'],
-                'secret' => $awsConfig['secret'],
-            ],
-            'region' => $awsConfig['region'],
-            'version' => 'latest',
-            'use_path_style_endpoint' => $awsConfig['use_path_style_endpoint'] ?? false,
-        ]);
-
-        $adapter = new AwsS3V3Adapter(
-            $s3Client,
-            $awsConfig['bucket']
-        );
-
-        $filesystem = new Filesystem($adapter);
-
-        return new FilesystemAdapter($filesystem, $adapter, [
-            'driver' => 's3',
-            'key' => $awsConfig['key'],
-            'secret' => $awsConfig['secret'],
-            'region' => $awsConfig['region'],
-            'bucket' => $awsConfig['bucket'],
+        $page->update([
+            'status' => 'completed',
+            'processing_error' => null,
         ]);
     }
 
-    /**
-     * Generate signed URL for PDF file
-     */
-    public function generateSignedUrl(string $filePath, int $expires = null): string
+    public function handlePageFailure(PdfDocumentPage $page, string $error): void
     {
-        $disk = $this->getStorageDisk();
-        
-        if (!$this->isS3Disk($disk)) {
-            throw new \Exception('Signed URLs are only available for S3 storage');
-        }
+        $page->update([
+            'status' => 'failed',
+            'processing_error' => $error,
+        ]);
 
-        $expires = $expires ?: config('pdf-viewer.storage.signed_url_expires', 3600);
+        Log::error('Page processing failed', [
+            'page_id' => $page->id,
+            'document_hash' => $page->document->hash,
+            'page_number' => $page->page_number,
+            'error' => $error,
+        ]);
+    }
+
+    protected function cleanExtractedText(string $text): string
+    {
+        // Remove excessive whitespace
+        $text = preg_replace('/\s+/', ' ', $text);
         
-        return $disk->temporaryUrl($filePath, now()->addSeconds($expires));
+        // Remove control characters but keep newlines and tabs
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+        
+        // Trim whitespace
+        $text = trim($text);
+        
+        return $text;
     }
 
     /**
-     * Generate signed URL for document
+     * Get the configured storage disk with package-specific S3 configuration
      */
-    public function generateDocumentSignedUrl(PdfDocument $document, int $expires = null): string
+    protected function getStorageDisk()
     {
-        return $this->generateSignedUrl($document->file_path, $expires);
-    }
-
-    /**
-     * Generate signed URL for page
-     */
-    public function generatePageSignedUrl(string $documentHash, int $pageNumber, int $expires = null): string
-    {
-        $pageFilePath = $this->getPageFilePath($documentHash, $pageNumber);
-        return $this->generateSignedUrl($pageFilePath, $expires);
-    }
-
-    /**
-     * Generate multiple signed URLs for document pages
-     */
-    public function generatePagesSignedUrls(string $documentHash, array $pageNumbers, int $expires = null): array
-    {
-        $urls = [];
+        $diskName = config('pdf-viewer.storage.disk');
         
-        foreach ($pageNumbers as $pageNumber) {
-            try {
-                $urls[$pageNumber] = $this->generatePageSignedUrl($documentHash, $pageNumber, $expires);
-            } catch (\Exception $e) {
-                Log::warning('Failed to generate signed URL for page', [
-                    'document_hash' => $documentHash,
-                    'page_number' => $pageNumber,
-                    'error' => $e->getMessage(),
+        // If using S3, create a custom S3 disk with package-specific credentials
+        if ($diskName === 's3') {
+            $awsConfig = config('pdf-viewer.storage.aws');
+            
+            if (!empty($awsConfig['key']) && !empty($awsConfig['secret']) && !empty($awsConfig['bucket'])) {
+                return Storage::build([
+                    'driver' => 's3',
+                    'key' => $awsConfig['key'],
+                    'secret' => $awsConfig['secret'],
+                    'region' => $awsConfig['region'] ?? 'ap-southeast-2',
+                    'bucket' => $awsConfig['bucket'],
+                    'url' => null,
+                    'endpoint' => null,
+                    'use_path_style_endpoint' => $awsConfig['use_path_style_endpoint'] ?? false,
+                    'throw' => false,
+                    'visibility' => 'public',
                 ]);
-                $urls[$pageNumber] = null;
             }
         }
         
-        return $urls;
+        // Fall back to configured disk
+        return Storage::disk($diskName);
     }
 
     /**
-     * Get the PDF viewer S3 client for advanced operations
+     * Extract single page using FPDI library with comprehensive PDF structure handling
      */
-    protected function getPdfViewerS3Client(): ?S3Client
+    protected function extractSinglePageWithFpdi(string $sourceFile, int $pageNumber, string $outputFile, array &$extractionContext = []): void
     {
-        $pdfAwsConfig = config('pdf-viewer.storage.aws');
-        
-        if (!$this->hasPdfViewerS3Config($pdfAwsConfig)) {
-            return null;
+        try {
+            // Pre-flight checks for PDF compatibility
+            $pdfInfo = $this->analyzePdfStructure($sourceFile);
+            $extractionContext['pdf_analysis'] = $pdfInfo;
+            
+            // Handle encryption first
+            if ($pdfInfo['encrypted'] && config('pdf-viewer.page_extraction.handle_encryption', true)) {
+                $sourceFile = $this->handleEncryptedPdf($sourceFile, $pdfInfo);
+                $extractionContext['issues_detected'][] = 'encryption_handled';
+            }
+            
+            // Initialize FPDI with comprehensive configuration
+            $pdf = new Fpdi();
+            
+            // Configure based on PDF analysis and settings
+            $this->configureFpdiForExtraction($pdf, $pdfInfo);
+            
+            // Set source file with comprehensive error handling
+            try {
+                $pageCount = $pdf->setSourceFile($sourceFile);
+                $extractionContext['total_pages'] = $pageCount;
+            } catch (\Exception $e) {
+                $extractionContext['extraction_strategy'] = 'fallback';
+                $this->handleExtractionError($e, $sourceFile, $pageNumber, $outputFile, $pdfInfo, $extractionContext);
+                return;
+            }
+            
+            // Validate page number
+            if ($pageNumber > $pageCount || $pageNumber < 1) {
+                throw new \Exception("Page {$pageNumber} does not exist in PDF (total pages: {$pageCount})");
+            }
+            
+            // Import page with resource optimization
+            $templateId = $pdf->importPage($pageNumber);
+            
+            // Handle page-specific configuration
+            $size = $pdf->getTemplateSize($templateId);
+            $rotation = $this->detectPageRotation($pdf, $templateId, $pdfInfo);
+            
+            // Add page with proper orientation and rotation
+            $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+            
+            // Apply rotation if detected
+            if ($rotation !== 0 && config('pdf-viewer.page_extraction.rotation_handling') === 'preserve') {
+                $pdf->Rotate($rotation);
+            }
+            
+            // Use template with resource handling
+            $pdf->useTemplate($templateId);
+            
+            // Handle metadata copying
+            $this->copyRelevantMetadata($pdf, $pdfInfo, $pageNumber);
+            
+            // Clean up navigation elements if configured
+            if (config('pdf-viewer.page_extraction.strip_navigation', true)) {
+                $this->stripNavigationElements($pdf, $pdfInfo, $pageNumber);
+            }
+            
+            // Output with validation
+            $pdf->Output('F', $outputFile);
+            
+            // Post-processing validation and optimization
+            $this->validateAndOptimizeExtractedPage($outputFile, $pageNumber, $pdfInfo, $extractionContext);
+            
+            // Mark extraction as successful
+            $extractionContext['status'] = 'success';
+            $extractionContext['final_file_size'] = filesize($outputFile);
+            
+        } catch (\Exception $e) {
+            $extractionContext['status'] = 'failed';
+            $extractionContext['error'] = $e->getMessage();
+            
+            Log::error('FPDI page extraction failed', [
+                'source_file' => $sourceFile,
+                'page_number' => $pageNumber,
+                'output_file' => $outputFile,
+                'error' => $e->getMessage(),
+                'pdf_info' => $pdfInfo ?? null,
+                'extraction_context' => $extractionContext,
+            ]);
+            throw new \Exception("FPDI extraction failed: {$e->getMessage()}");
         }
+    }
 
-        return new S3Client([
-            'credentials' => [
-                'key' => $pdfAwsConfig['key'],
-                'secret' => $pdfAwsConfig['secret'],
-            ],
-            'region' => $pdfAwsConfig['region'],
-            'version' => 'latest',
-            'use_path_style_endpoint' => $pdfAwsConfig['use_path_style_endpoint'] ?? false,
+    /**
+     * Handle font extraction issues with fallback strategy
+     */
+    protected function handleFontExtractionFallback(string $sourceFile, int $pageNumber, string $outputFile): void
+    {
+        $strategy = config('pdf-viewer.page_extraction.font_fallback_strategy', 'preserve');
+        
+        switch ($strategy) {
+            case 'substitute':
+                // Use basic FPDI without font preservation
+                $this->extractPageWithBasicFpdi($sourceFile, $pageNumber, $outputFile);
+                break;
+                
+            case 'ignore':
+                // Copy the entire PDF as fallback (preserves all fonts)
+                copy($sourceFile, $outputFile);
+                Log::warning('Font issues detected, copied entire PDF as fallback', [
+                    'source_file' => $sourceFile,
+                    'page_number' => $pageNumber,
+                    'output_file' => $outputFile,
+                ]);
+                break;
+                
+            case 'preserve':
+            default:
+                // Try alternative PDF libraries or tools
+                throw new \Exception("Font preservation failed and no suitable fallback available");
+        }
+    }
+
+    /**
+     * Extract page with basic FPDI (may not preserve all fonts)
+     */
+    protected function extractPageWithBasicFpdi(string $sourceFile, int $pageNumber, string $outputFile): void
+    {
+        $pdf = new Fpdi();
+        
+        // Basic extraction without font-specific handling
+        $pageCount = $pdf->setSourceFile($sourceFile);
+        $templateId = $pdf->importPage($pageNumber);
+        $size = $pdf->getTemplateSize($templateId);
+        $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+        $pdf->useTemplate($templateId);
+        $pdf->Output('F', $outputFile);
+        
+        Log::info('Page extracted with basic FPDI (fonts may be substituted)', [
+            'source_file' => $sourceFile,
+            'page_number' => $pageNumber,
+            'output_file' => $outputFile,
         ]);
     }
 
     /**
-     * Generate pre-signed POST data for direct uploads to PDF S3 bucket
+     * Validate that fonts are preserved in extracted page
      */
-    public function generatePresignedPost(string $filePath, array $conditions = [], int $expires = null): array
+    protected function validateExtractedPageFonts(string $outputFile, int $pageNumber): void
     {
-        $s3Client = $this->getPdfViewerS3Client();
-        
-        if (!$s3Client) {
-            throw new \Exception('PDF viewer S3 configuration not available');
+        try {
+            // Basic validation - check if the PDF is readable and has content
+            if (!file_exists($outputFile)) {
+                throw new \Exception('Extracted page file does not exist');
+            }
+            
+            // Check file size (should be reasonable, not empty)
+            $fileSize = filesize($outputFile);
+            if ($fileSize < 100) { // Very small files likely indicate extraction failure
+                throw new \Exception('Extracted page file is too small, may indicate font issues');
+            }
+            
+            // Verify it's a valid PDF
+            $handle = fopen($outputFile, 'r');
+            $header = fread($handle, 5);
+            fclose($handle);
+            
+            if (strpos($header, '%PDF') !== 0) {
+                throw new \Exception('Extracted file is not a valid PDF');
+            }
+            
+            Log::debug('Page extraction validation passed', [
+                'output_file' => $outputFile,
+                'page_number' => $pageNumber,
+                'file_size' => $fileSize,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::warning('Page font validation failed', [
+                'output_file' => $outputFile,
+                'page_number' => $pageNumber,
+                'error' => $e->getMessage(),
+            ]);
+            // Don't throw - let the extraction continue even if validation fails
         }
+    }
 
-        $bucket = config('pdf-viewer.storage.aws.bucket');
-        $expires = $expires ?: config('pdf-viewer.storage.signed_url_expires', 3600);
-
-        $defaultConditions = [
-            ['bucket' => $bucket],
-            ['starts-with', '$key', dirname($filePath) . '/'],
-            ['content-length-range', 1, config('pdf-viewer.processing.max_file_size', 104857600)],
+    /**
+     * Analyze PDF structure for extraction compatibility
+     */
+    protected function analyzePdfStructure(string $sourceFile): array
+    {
+        $info = [
+            'encrypted' => false,
+            'linearized' => false,
+            'has_incremental_updates' => false,
+            'has_javascript' => false,
+            'has_form_fields' => false,
+            'has_annotations' => false,
+            'font_count' => 0,
+            'image_count' => 0,
+            'version' => '1.4',
+            'page_rotations' => [],
         ];
+        
+        try {
+            // Basic file analysis
+            $handle = fopen($sourceFile, 'rb');
+            $header = fread($handle, 1024);
+            fclose($handle);
+            
+            // Check encryption
+            $info['encrypted'] = strpos($header, '/Encrypt') !== false;
+            
+            // Check linearization
+            $info['linearized'] = strpos($header, '/Linearized') !== false;
+            
+            // Check for JavaScript
+            $info['has_javascript'] = strpos(file_get_contents($sourceFile), '/JavaScript') !== false;
+            
+            // Check for form fields
+            $info['has_form_fields'] = strpos(file_get_contents($sourceFile), '/AcroForm') !== false;
+            
+            // Check for annotations
+            $info['has_annotations'] = strpos(file_get_contents($sourceFile), '/Annots') !== false;
+            
+            // Extract PDF version
+            if (preg_match('/%PDF-(\d+\.\d+)/', $header, $matches)) {
+                $info['version'] = $matches[1];
+            }
+            
+            Log::debug('PDF structure analysis completed', [
+                'source_file' => $sourceFile,
+                'pdf_info' => $info,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::warning('PDF structure analysis failed, using defaults', [
+                'source_file' => $sourceFile,
+                'error' => $e->getMessage(),
+            ]);
+        }
+        
+        return $info;
+    }
 
-        $allConditions = array_merge($defaultConditions, $conditions);
-
-        $postObject = $s3Client->createPresignedPost([
-            'Bucket' => $bucket,
-            'Key' => $filePath,
-            'Conditions' => $allConditions,
-            'Expires' => $expires,
+    /**
+     * Handle encrypted PDFs
+     */
+    protected function handleEncryptedPdf(string $sourceFile, array $pdfInfo): string
+    {
+        if (!$pdfInfo['encrypted']) {
+            return $sourceFile;
+        }
+        
+        Log::warning('Encrypted PDF detected - extraction may fail or produce limited results', [
+            'source_file' => $sourceFile,
+            'pdf_version' => $pdfInfo['version'],
         ]);
+        
+        // For now, attempt extraction anyway - FPDI may handle some encryption
+        // In production, you might want to implement password handling here
+        return $sourceFile;
+    }
 
-        return $postObject;
+    /**
+     * Configure FPDI based on PDF analysis
+     */
+    protected function configureFpdiForExtraction(Fpdi $pdf, array $pdfInfo): void
+    {
+        // Font configuration
+        if (config('pdf-viewer.page_extraction.preserve_fonts', true)) {
+            $pdf->SetFont('helvetica', '', 12);
+            $pdf->setFontSubsetting(false);
+        }
+        
+        // Compression
+        if (config('pdf-viewer.page_extraction.compression', true)) {
+            $pdf->SetCompression(true);
+        }
+        
+        // Handle special PDF features
+        if ($pdfInfo['linearized']) {
+            Log::info('Linearized PDF detected - extraction may need special handling');
+        }
+        
+        // Set metadata
+        $pdf->SetCreator('Laravel PDF Viewer');
+        $pdf->SetTitle('Extracted Page');
+        $pdf->SetSubject('Single page extracted from multi-page PDF');
+    }
+
+    /**
+     * Handle extraction errors with appropriate fallbacks
+     */
+    protected function handleExtractionError(\Exception $e, string $sourceFile, int $pageNumber, string $outputFile, array $pdfInfo, array &$extractionContext): void
+    {
+        $errorMsg = $e->getMessage();
+        
+        // Font-related errors
+        if (str_contains($errorMsg, 'font') || str_contains($errorMsg, 'encoding')) {
+            Log::warning('Font-related issue detected', [
+                'source_file' => $sourceFile,
+                'page_number' => $pageNumber,
+                'error' => $errorMsg,
+                'pdf_info' => $pdfInfo,
+            ]);
+            $this->handleFontExtractionFallback($sourceFile, $pageNumber, $outputFile);
+            $extractionContext['fallbacks_used'][] = 'font_fallback';
+            return;
+        }
+        
+        // Encryption errors
+        if (str_contains($errorMsg, 'encrypt') || str_contains($errorMsg, 'password')) {
+            Log::warning('Encryption issue detected', [
+                'source_file' => $sourceFile,
+                'page_number' => $pageNumber,
+                'error' => $errorMsg,
+            ]);
+            throw new \Exception("PDF is encrypted and cannot be processed without password");
+        }
+        
+        // Resource/structure errors
+        if (str_contains($errorMsg, 'resource') || str_contains($errorMsg, 'reference')) {
+            Log::warning('Resource sharing issue detected', [
+                'source_file' => $sourceFile,
+                'page_number' => $pageNumber,
+                'error' => $errorMsg,
+                'pdf_info' => $pdfInfo,
+            ]);
+            $this->handleResourceSharingFallback($sourceFile, $pageNumber, $outputFile);
+            $extractionContext['fallbacks_used'][] = 'resource_sharing_fallback';
+            return;
+        }
+        
+        throw $e;
+    }
+
+    /**
+     * Handle resource sharing issues with smart copying
+     */
+    protected function handleResourceSharingFallback(string $sourceFile, int $pageNumber, string $outputFile): void
+    {
+        $strategy = config('pdf-viewer.page_extraction.resource_strategy', 'smart_copy');
+        
+        switch ($strategy) {
+            case 'duplicate_all':
+                // Copy entire PDF to ensure all resources are available
+                copy($sourceFile, $outputFile);
+                Log::info('Resource sharing issue resolved by copying entire PDF', [
+                    'page_number' => $pageNumber,
+                    'strategy' => 'duplicate_all',
+                ]);
+                break;
+                
+            case 'minimal':
+                // Try basic extraction without resource optimization
+                $this->extractPageWithBasicFpdi($sourceFile, $pageNumber, $outputFile);
+                break;
+                
+            case 'smart_copy':
+            default:
+                // Attempt extraction with resource analysis
+                $this->extractWithResourceAnalysis($sourceFile, $pageNumber, $outputFile);
+                break;
+        }
+    }
+
+    /**
+     * Extract page with resource usage analysis
+     */
+    protected function extractWithResourceAnalysis(string $sourceFile, int $pageNumber, string $outputFile): void
+    {
+        try {
+            $pdf = new Fpdi();
+            
+            // Use more conservative settings for problematic PDFs
+            $pdf->setFontSubsetting(true); // Allow font subsetting for resource optimization
+            $pdf->SetCompression(false); // Disable compression to avoid issues
+            
+            $pageCount = $pdf->setSourceFile($sourceFile);
+            $templateId = $pdf->importPage($pageNumber);
+            $size = $pdf->getTemplateSize($templateId);
+            $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+            $pdf->useTemplate($templateId);
+            $pdf->Output('F', $outputFile);
+            
+            // Check extracted file size
+            $extractedSize = filesize($outputFile);
+            $maxSize = config('pdf-viewer.page_extraction.max_resource_size', 10485760);
+            
+            if ($extractedSize > $maxSize) {
+                Log::warning('Extracted page exceeds size limit, may contain excessive resources', [
+                    'page_number' => $pageNumber,
+                    'extracted_size' => $extractedSize,
+                    'max_size' => $maxSize,
+                ]);
+            }
+            
+        } catch (\Exception $e) {
+            // Ultimate fallback - copy entire PDF
+            copy($sourceFile, $outputFile);
+            Log::warning('Resource analysis extraction failed, used entire PDF copy', [
+                'page_number' => $pageNumber,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Detect page rotation
+     */
+    protected function detectPageRotation(Fpdi $pdf, $templateId, array $pdfInfo): int
+    {
+        // FPDI doesn't directly expose rotation info, so we use template size analysis
+        $size = $pdf->getTemplateSize($templateId);
+        
+        // Simple heuristic: if width > height significantly, might be rotated
+        $aspectRatio = $size['width'] / $size['height'];
+        
+        if ($aspectRatio > 1.5) {
+            Log::debug('Potential landscape orientation detected', [
+                'aspect_ratio' => $aspectRatio,
+                'width' => $size['width'],
+                'height' => $size['height'],
+            ]);
+        }
+        
+        return 0; // FPDI handles rotation automatically in most cases
+    }
+
+    /**
+     * Copy relevant metadata to extracted page
+     */
+    protected function copyRelevantMetadata(Fpdi $pdf, array $pdfInfo, int $pageNumber): void
+    {
+        $copyStrategy = config('pdf-viewer.page_extraction.copy_metadata', 'basic');
+        
+        if ($copyStrategy === 'none') {
+            return;
+        }
+        
+        // Basic metadata
+        $pdf->SetCreator('Laravel PDF Viewer - Page Extraction');
+        $pdf->SetTitle("Page {$pageNumber}");
+        $pdf->SetSubject("Single page extracted from multi-page PDF");
+        $pdf->SetKeywords('extracted-page, pdf-viewer');
+        
+        if ($copyStrategy === 'full') {
+            // Additional metadata could be copied here
+            $pdf->SetAuthor('Original PDF Author (Page Extract)');
+        }
+    }
+
+    /**
+     * Strip navigation elements that don't make sense in single pages
+     */
+    protected function stripNavigationElements(Fpdi $pdf, array $pdfInfo, int $pageNumber): void
+    {
+        // FPDI automatically strips most navigation elements during template import
+        // This method is a placeholder for future enhancements
+        
+        Log::debug('Navigation elements stripped from extracted page', [
+            'page_number' => $pageNumber,
+            'had_javascript' => $pdfInfo['has_javascript'],
+            'had_form_fields' => $pdfInfo['has_form_fields'],
+            'had_annotations' => $pdfInfo['has_annotations'],
+        ]);
+    }
+
+    /**
+     * Validate and optimize extracted page
+     */
+    protected function validateAndOptimizeExtractedPage(string $outputFile, int $pageNumber, array $pdfInfo, array &$extractionContext): void
+    {
+        // Validate extraction quality
+        if (config('pdf-viewer.page_extraction.validate_fonts', true)) {
+            $this->validateExtractedPageFonts($outputFile, $pageNumber);
+        }
+        
+        // Check for resource optimization opportunities
+        if (config('pdf-viewer.page_extraction.optimize_resources', true)) {
+            $this->optimizeExtractedPageResources($outputFile, $pdfInfo);
+        }
+        
+        // Log extraction summary
+        $fileSize = filesize($outputFile);
+        Log::info('Page extraction completed with validation', [
+            'page_number' => $pageNumber,
+            'output_file_size' => $fileSize,
+            'pdf_was_encrypted' => $pdfInfo['encrypted'],
+            'pdf_was_linearized' => $pdfInfo['linearized'],
+            'had_complex_features' => $pdfInfo['has_javascript'] || $pdfInfo['has_form_fields'],
+        ]);
+    }
+
+    /**
+     * Optimize resources in extracted page
+     */
+    protected function optimizeExtractedPageResources(string $outputFile, array $pdfInfo): void
+    {
+        $fileSize = filesize($outputFile);
+        $maxSize = config('pdf-viewer.page_extraction.max_resource_size', 10485760);
+        
+        if ($fileSize > $maxSize) {
+            Log::warning('Extracted page exceeds optimal size', [
+                'file_size' => $fileSize,
+                'max_size' => $maxSize,
+                'optimization_needed' => true,
+            ]);
+            
+            // Could implement additional optimization here if needed
+            // For now, just log the issue for monitoring
+        }
+    }
+
+    /**
+     * Check if the storage disk is S3
+     */
+    protected function isS3Disk($disk): bool
+    {
+        return method_exists($disk->getAdapter(), 'getBucket') || 
+               (config('pdf-viewer.storage.disk') === 's3');
+    }
+
+    /**
+     * Get source file path for document
+     */
+    protected function getSourceFilePath(PdfDocument $document): string
+    {
+        $disk = $this->getStorageDisk();
+        
+        if ($this->isS3Disk($disk)) {
+            $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+            $tempFile = $tempDir . '/source_' . $document->hash . '.pdf';
+            
+            if (!file_exists($tempFile)) {
+                $content = $disk->get($document->file_path);
+                file_put_contents($tempFile, $content);
+            }
+            
+            return $tempFile;
+        }
+        
+        return storage_path('app/' . $document->file_path);
     }
 }

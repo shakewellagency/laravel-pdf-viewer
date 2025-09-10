@@ -44,7 +44,7 @@ class PdfDocumentFactory extends Factory
             'status' => 'uploaded',
             'processing_started_at' => null,
             'processing_completed_at' => null,
-            'error_message' => null,
+            'processing_error' => null,
             'is_searchable' => false,
         ]);
     }
@@ -55,7 +55,7 @@ class PdfDocumentFactory extends Factory
             'status' => 'processing',
             'processing_started_at' => now(),
             'processing_completed_at' => null,
-            'error_message' => null,
+            'processing_error' => null,
             'is_searchable' => false,
         ]);
     }
@@ -66,7 +66,7 @@ class PdfDocumentFactory extends Factory
             'status' => 'completed',
             'processing_started_at' => now()->subMinutes(30),
             'processing_completed_at' => now(),
-            'error_message' => null,
+            'processing_error' => null,
             'is_searchable' => true,
         ]);
     }
@@ -77,7 +77,7 @@ class PdfDocumentFactory extends Factory
             'status' => 'failed',
             'processing_started_at' => now()->subMinutes(15),
             'processing_completed_at' => null,
-            'error_message' => 'Processing failed due to corrupted PDF',
+            'processing_error' => 'Processing failed due to corrupted PDF',
             'is_searchable' => false,
         ]);
     }

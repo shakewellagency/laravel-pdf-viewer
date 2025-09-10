@@ -16,7 +16,14 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
         $document->update([
             'status' => 'processing',
             'processing_started_at' => now(),
-            'processing_progress' => ['stage' => 'initializing', 'progress' => 0],
+        ]);
+
+        // Create processing step for initialization
+        $document->updateProcessingStep('initialization', [
+            'status' => 'processing',
+            'total_items' => 1,
+            'completed_items' => 0,
+            'progress_percentage' => 0,
         ]);
 
         // Extract basic metadata first
@@ -26,8 +33,24 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
 
             $document->update([
                 'page_count' => $pageCount,
-                'metadata' => array_merge($document->metadata ?? [], $metadata),
-                'processing_progress' => ['stage' => 'metadata_extracted', 'progress' => 10],
+            ]);
+
+            // Store extracted metadata in normalized structure
+            foreach ($metadata as $key => $value) {
+                $document->setMetadata($key, $value);
+            }
+
+            // Update processing step for metadata extraction
+            $initStep = $document->getProcessingStep('initialization');
+            if ($initStep) {
+                $initStep->markAsCompleted();
+            }
+
+            $document->updateProcessingStep('metadata_extraction', [
+                'status' => 'completed',
+                'total_items' => 1,
+                'completed_items' => 1,
+                'progress_percentage' => 100,
             ]);
 
             // Dispatch the main processing job
@@ -160,7 +183,7 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
             'processing_started_at' => $document->processing_started_at,
             'processing_completed_at' => $document->processing_completed_at,
             'processing_error' => $document->processing_error,
-            'processing_progress' => $document->processing_progress,
+            'processing_steps' => $document->processingSteps()->get()->keyBy('step_name'),
             'is_searchable' => $document->is_searchable,
         ];
     }
@@ -176,8 +199,10 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
         $document->update([
             'status' => 'cancelled',
             'processing_error' => 'Processing cancelled by user',
-            'processing_progress' => ['stage' => 'cancelled', 'progress' => 0],
         ]);
+
+        // Update processing steps to cancelled
+        $document->processingSteps()->update(['status' => 'failed']);
 
         // TODO: Cancel any running jobs for this document
         // This would require job tracking implementation
@@ -199,8 +224,10 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
             'processing_error' => null,
             'processing_started_at' => null,
             'processing_completed_at' => null,
-            'processing_progress' => null,
         ]);
+
+        // Clear processing steps
+        $document->processingSteps()->delete();
 
         // Reset all failed pages
         $document->pages()->where('status', 'failed')->update([
@@ -225,8 +252,13 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
         $document->update([
             'status' => 'completed',
             'processing_completed_at' => now(),
-            'processing_progress' => ['stage' => 'completed', 'progress' => 100],
             'is_searchable' => true,
+        ]);
+
+        // Mark all processing steps as completed
+        $document->processingSteps()->update([
+            'status' => 'completed',
+            'completed_at' => now(),
         ]);
 
         // Trigger cache warming
@@ -253,8 +285,16 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
         $document->update([
             'status' => 'failed',
             'processing_error' => $error,
-            'processing_progress' => ['stage' => 'failed', 'progress' => 0],
         ]);
+
+        // Mark processing steps as failed
+        $document->processingSteps()
+            ->where('status', 'processing')
+            ->update([
+                'status' => 'failed',
+                'error_message' => $error,
+                'completed_at' => now(),
+            ]);
 
         Log::error('PDF document processing failed', [
             'document_hash' => $documentHash,

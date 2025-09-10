@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 
 class ExtractPageJob implements ShouldQueue
 {
@@ -40,7 +41,7 @@ class ExtractPageJob implements ShouldQueue
         $this->retryAfter = config('pdf-viewer.jobs.page_extraction.retry_after', 30);
     }
 
-    public function handle(PageProcessingServiceInterface $pageService): void
+    public function handle(PageProcessingServiceInterface $pageService, ExtractionAuditService $auditService): void
     {
         try {
             $page = PdfDocumentPage::where('pdf_document_id', $this->document->id)
@@ -60,17 +61,34 @@ class ExtractPageJob implements ShouldQueue
                 'page_id' => $page->id,
             ]);
 
-            // Extract individual page from PDF
-            $pageFilePath = $pageService->extractPage($this->document, $this->pageNumber);
+            // Initiate audit trail for this page extraction
+            $audit = $auditService->initiateExtraction(
+                $this->document,
+                [$this->pageNumber],
+                'page_extraction',
+                'Individual page extraction for viewing'
+            );
 
-            // Update page with file path
-            $page->update(['page_file_path' => $pageFilePath]);
+            // Extract individual page from PDF
+            $extractionResult = $pageService->extractPageWithContext($this->document, $this->pageNumber);
+            
+            // Record page completion in audit trail
+            $auditService->recordPageCompletion($audit, $this->pageNumber, $extractionResult['context']);
+
+            // Update page with file path and extraction metadata
+            $page->update([
+                'page_file_path' => $extractionResult['file_path'],
+                'metadata' => array_merge($page->metadata ?? [], [
+                    'extraction' => $extractionResult['context'],
+                    'extracted_at' => now()->toISOString(),
+                ]),
+            ]);
 
             // Generate thumbnail if enabled
             if (config('pdf-viewer.thumbnails.enabled', true)) {
                 try {
                     $thumbnailPath = $pageService->generateThumbnail(
-                        $pageFilePath,
+                        $extractionResult['file_path'],
                         config('pdf-viewer.thumbnails.width', 300),
                         config('pdf-viewer.thumbnails.height', 400)
                     );
@@ -88,13 +106,17 @@ class ExtractPageJob implements ShouldQueue
                 }
             }
 
+            // Complete audit trail
+            $auditService->completeExtraction($audit);
+
             // Dispatch text processing job for this page
             ProcessPageTextJob::dispatch($page);
 
             Log::info('Page extraction completed', [
                 'document_hash' => $this->document->hash,
                 'page_number' => $this->pageNumber,
-                'page_file_path' => $pageFilePath,
+                'page_file_path' => $extractionResult['file_path'],
+                'audit_id' => $audit->id,
             ]);
 
         } catch (\Exception $e) {
@@ -104,6 +126,14 @@ class ExtractPageJob implements ShouldQueue
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            // Record failure in audit trail if audit was initiated
+            if (isset($audit)) {
+                $auditService->recordExtractionFailure($audit, $e->getMessage(), [
+                    'page_number' => $this->pageNumber,
+                    'job_attempt' => $this->attempts(),
+                ]);
+            }
 
             // Update page status to failed
             if (isset($page)) {

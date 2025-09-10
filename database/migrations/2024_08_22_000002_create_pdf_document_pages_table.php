@@ -41,8 +41,8 @@ return new class extends Migration
             $table->index(['status']);
             $table->index(['is_parsed']);
 
-            // Full-text search index for content (MySQL only)
-            if (Schema::getConnection()->getDriverName() === 'mysql') {
+            // Full-text search index for content (only for MySQL/PostgreSQL)
+            if (Schema::getConnection()->getDriverName() !== 'sqlite') {
                 $table->fullText(['content'], 'pdf_pages_content_fulltext');
             }
         });

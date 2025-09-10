@@ -110,25 +110,14 @@ class PageController extends Controller
                 abort(404, 'Thumbnail file not found');
             }
 
-            // For S3/Vapor, return signed URL instead of streaming content
-            if ($this->isS3Disk($disk)) {
-                $signedUrl = $this->documentService->getSignedUrl($page->thumbnail_path, 3600); // 1 hour
-                
-                return response()->json([
-                    'url' => $signedUrl,
-                    'expires_in' => 3600,
-                    'content_type' => 'image/jpeg'
-                ]);
-            }
-
-            // For local storage, stream the content as before
-            $content = $disk->get($page->thumbnail_path);
-            $mimeType = $disk->mimeType($page->thumbnail_path) ?: 'image/jpeg';
-
-            return response($content)
-                ->header('Content-Type', $mimeType)
-                ->header('Content-Disposition', 'inline')
-                ->header('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+            // Always return signed URL for consistent frontend handling
+            $signedUrl = $this->documentService->getSignedUrl($page->thumbnail_path, 3600); // 1 hour
+            
+            return response()->json([
+                'url' => $signedUrl,
+                'expires_in' => 3600,
+                'content_type' => 'image/jpeg'
+            ]);
 
         } catch (\Exception $e) {
             abort(500, 'Failed to retrieve thumbnail');
@@ -156,27 +145,16 @@ class PageController extends Controller
                 abort(404, 'Page file not found');
             }
 
-            // For S3/Vapor, return signed URL instead of streaming content
-            if ($this->isS3Disk($disk)) {
-                $signedUrl = $this->documentService->getSignedUrl($page->page_file_path, 1800); // 30 minutes
-                $filename = $document->title . "_page_{$pageNumber}.pdf";
-                
-                return response()->json([
-                    'url' => $signedUrl,
-                    'expires_in' => 1800,
-                    'content_type' => 'application/pdf',
-                    'filename' => $filename
-                ]);
-            }
-
-            // For local storage, stream the content as before
-            $content = $disk->get($page->page_file_path);
+            // Always return signed URL for consistent frontend handling
+            $signedUrl = $this->documentService->getSignedUrl($page->page_file_path, 1800); // 30 minutes
             $filename = $document->title . "_page_{$pageNumber}.pdf";
-
-            return response($content)
-                ->header('Content-Type', 'application/pdf')
-                ->header('Content-Disposition', 'attachment; filename="' . $filename . '"')
-                ->header('Cache-Control', 'no-cache, must-revalidate');
+            
+            return response()->json([
+                'url' => $signedUrl,
+                'expires_in' => 1800,
+                'content_type' => 'application/pdf',
+                'filename' => $filename
+            ]);
 
         } catch (\Exception $e) {
             abort(500, 'Failed to download page');
