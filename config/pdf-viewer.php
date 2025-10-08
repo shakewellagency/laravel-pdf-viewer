@@ -64,19 +64,19 @@ return [
     */
     'jobs' => [
         'document_processing' => [
-            'queue' => env('PDF_VIEWER_DOCUMENT_QUEUE', 'pdf-processing'),
+            'queue' => env('PDF_VIEWER_DOCUMENT_QUEUE', 'default'),
             'tries' => env('PDF_VIEWER_DOCUMENT_TRIES', 3),
             'timeout' => env('PDF_VIEWER_DOCUMENT_TIMEOUT', 300),
             'retry_after' => env('PDF_VIEWER_DOCUMENT_RETRY_AFTER', 60),
         ],
         'page_extraction' => [
-            'queue' => env('PDF_VIEWER_PAGE_QUEUE', 'pdf-pages'),
+            'queue' => env('PDF_VIEWER_PAGE_QUEUE', 'default'),
             'tries' => env('PDF_VIEWER_PAGE_TRIES', 2),
             'timeout' => env('PDF_VIEWER_PAGE_TIMEOUT', 60),
             'retry_after' => env('PDF_VIEWER_PAGE_RETRY_AFTER', 30),
         ],
         'text_processing' => [
-            'queue' => env('PDF_VIEWER_TEXT_QUEUE', 'pdf-text'),
+            'queue' => env('PDF_VIEWER_TEXT_QUEUE', 'default'),
             'tries' => env('PDF_VIEWER_TEXT_TRIES', 2),
             'timeout' => env('PDF_VIEWER_TEXT_TIMEOUT', 30),
             'retry_after' => env('PDF_VIEWER_TEXT_RETRY_AFTER', 15),
