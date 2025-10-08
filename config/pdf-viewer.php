@@ -50,7 +50,7 @@ return [
     */
     'processing' => [
         'queue' => env('PDF_VIEWER_QUEUE', 'default'),
-        'max_file_size' => env('PDF_VIEWER_MAX_FILE_SIZE', 104857600), // 100MB
+        'max_file_size' => env('PDF_VIEWER_MAX_FILE_SIZE', 5368709120), // 5GB
         'allowed_extensions' => ['pdf'],
         'allowed_mime_types' => ['application/pdf'],
         'timeout' => env('PDF_VIEWER_TIMEOUT', 300), // 5 minutes
