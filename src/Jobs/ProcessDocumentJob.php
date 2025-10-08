@@ -23,8 +23,9 @@ class ProcessDocumentJob implements ShouldQueue
     public function __construct(
         public PdfDocument $document
     ) {
-        $this->onQueue(config('pdf-viewer.jobs.document_processing.queue', 'default'));
-        
+        // Use Laravel's default queue connection - do not override
+        // Queue name is handled by Laravel's queue configuration
+
         // Vapor-aware timeout configuration
         if (config('pdf-viewer.vapor.enabled', false)) {
             // Respect Vapor Lambda timeout limits (max 15 minutes)

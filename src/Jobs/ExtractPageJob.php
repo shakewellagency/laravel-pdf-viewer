@@ -24,8 +24,9 @@ class ExtractPageJob implements ShouldQueue
         public PdfDocument $document,
         public int $pageNumber
     ) {
-        $this->onQueue(config('pdf-viewer.jobs.page_extraction.queue', 'default'));
-        
+        // Use Laravel's default queue connection - do not override
+        // Queue name is handled by Laravel's queue configuration
+
         // Vapor-aware timeout configuration
         if (config('pdf-viewer.vapor.enabled', false)) {
             $this->timeout = min(
