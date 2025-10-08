@@ -62,7 +62,12 @@ interface DocumentServiceInterface
     public function initiateMultipartUpload(array $metadata): array;
 
     /**
-     * Generate signed URLs for multipart upload parts
+     * Generate signed URL for a single multipart upload part
+     */
+    public function getMultipartPartUrl(string $documentHash, int $partNumber): string;
+
+    /**
+     * Generate signed URLs for multipart upload parts (bulk)
      */
     public function getMultipartUploadUrls(string $documentHash, int $totalParts): array;
 

@@ -26,9 +26,10 @@ Route::prefix('documents')->group(function () {
 
     // Multipart upload routes
     Route::post('/multipart/initiate', [DocumentController::class, 'initiateMultipartUpload'])->name('pdf-viewer.documents.multipart.initiate');
+    Route::get('/{document_hash}/multipart/part-url', [DocumentController::class, 'getMultipartPartUrl'])->name('pdf-viewer.documents.multipart.part-url');
+    Route::post('/{document_hash}/multipart/urls', [DocumentController::class, 'getMultipartUrls'])->name('pdf-viewer.documents.multipart.urls');
     Route::post('/{document_hash}/multipart/complete', [DocumentController::class, 'completeMultipartUpload'])->name('pdf-viewer.documents.multipart.complete');
     Route::delete('/{document_hash}/multipart/abort', [DocumentController::class, 'abortMultipartUpload'])->name('pdf-viewer.documents.multipart.abort');
-    Route::post('/{document_hash}/multipart/urls', [DocumentController::class, 'getMultipartUrls'])->name('pdf-viewer.documents.multipart.urls');
 
     // Document processing routes
     Route::post('/{document_hash}/process', [DocumentController::class, 'process'])->name('pdf-viewer.documents.process');

@@ -387,28 +387,20 @@ class DocumentController extends Controller
             'title' => 'required|string|max:255',
             'original_filename' => 'required|string|max:255',
             'file_size' => 'required|integer|min:1',
-            'total_parts' => 'required|integer|min:1|max:10000',
         ]);
 
         try {
             $metadata = $request->only(['title', 'original_filename', 'file_size']);
-            $totalParts = $request->input('total_parts');
 
-            // Initiate multipart upload
+            // Initiate multipart upload (returns document_hash and upload_id)
             $upload = $this->documentService->initiateMultipartUpload($metadata);
-
-            // Generate signed URLs for all parts
-            $signedUrls = $this->documentService->getMultipartUploadUrls(
-                $upload['document_hash'], 
-                $totalParts
-            );
 
             return response()->json([
                 'message' => 'Multipart upload initiated successfully',
                 'data' => [
                     'document_hash' => $upload['document_hash'],
                     'upload_id' => $upload['upload_id'],
-                    'signed_urls' => $signedUrls,
+                    'file_path' => $upload['file_path'],
                     'expires_in' => $upload['expires_in'],
                 ],
             ]);
@@ -485,7 +477,38 @@ class DocumentController extends Controller
     }
 
     /**
-     * Get additional signed URLs for multipart upload (if needed)
+     * Get presigned URL for a single part (GET endpoint)
+     */
+    public function getMultipartPartUrl(\Illuminate\Http\Request $request, string $documentHash): JsonResponse
+    {
+        $request->validate([
+            'part_number' => 'required|integer|min:1|max:10000',
+        ]);
+
+        try {
+            $partNumber = $request->input('part_number');
+
+            $signedUrl = $this->documentService->getMultipartPartUrl($documentHash, $partNumber);
+
+            return response()->json([
+                'data' => [
+                    'document_hash' => $documentHash,
+                    'part_number' => $partNumber,
+                    'signed_url' => $signedUrl,
+                    'expires_in' => config('pdf-viewer.storage.signed_url_expires', 3600),
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to generate presigned URL for part',
+                'error' => $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Get additional signed URLs for multipart upload (bulk - if needed)
      */
     public function getMultipartUrls(\Illuminate\Http\Request $request, string $documentHash): JsonResponse
     {
@@ -495,7 +518,7 @@ class DocumentController extends Controller
 
         try {
             $totalParts = $request->input('total_parts');
-            
+
             $signedUrls = $this->documentService->getMultipartUploadUrls($documentHash, $totalParts);
 
             return response()->json([

@@ -458,12 +458,12 @@ class DocumentService implements DocumentServiceInterface
     }
 
     /**
-     * Generate signed URLs for multipart upload parts
+     * Generate signed URL for a single multipart upload part
      */
-    public function getMultipartUploadUrls(string $documentHash, int $totalParts): array
+    public function getMultipartPartUrl(string $documentHash, int $partNumber): string
     {
         $document = $this->findByHashOrFail($documentHash);
-        
+
         if ($document->status !== 'pending_upload') {
             throw new \Exception('Document is not in pending upload state');
         }
@@ -479,7 +479,66 @@ class DocumentService implements DocumentServiceInterface
         $clientProperty = $reflection->getProperty('client');
         $clientProperty->setAccessible(true);
         $s3Client = $clientProperty->getValue($adapter);
-        
+
+        $bucketProperty = $reflection->getProperty('bucket');
+        $bucketProperty->setAccessible(true);
+        $bucketName = $bucketProperty->getValue($adapter);
+
+        $expiresIn = config('pdf-viewer.storage.signed_url_expires', 3600);
+
+        try {
+            $command = $s3Client->getCommand('UploadPart', [
+                'Bucket' => $bucketName,
+                'Key' => $document->file_path,
+                'UploadId' => $uploadId,
+                'PartNumber' => $partNumber,
+            ]);
+
+            $signedUrl = (string) $s3Client->createPresignedRequest($command, "+{$expiresIn} seconds")->getUri();
+
+            Log::info('Generated multipart upload URL for part', [
+                'document_hash' => $documentHash,
+                'upload_id' => $uploadId,
+                'part_number' => $partNumber,
+            ]);
+
+            return $signedUrl;
+
+        } catch (\Exception $e) {
+            Log::error('Failed to generate multipart upload URL for part', [
+                'document_hash' => $documentHash,
+                'upload_id' => $uploadId,
+                'part_number' => $partNumber,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Generate signed URLs for multipart upload parts (bulk)
+     */
+    public function getMultipartUploadUrls(string $documentHash, int $totalParts): array
+    {
+        $document = $this->findByHashOrFail($documentHash);
+
+        if ($document->status !== 'pending_upload') {
+            throw new \Exception('Document is not in pending upload state');
+        }
+
+        $uploadId = $document->metadata['multipart_upload_id'] ?? null;
+        if (!$uploadId) {
+            throw new \Exception('No multipart upload ID found for document');
+        }
+
+        $disk = $this->getStorageDisk();
+        $adapter = $disk->getAdapter();
+        $reflection = new \ReflectionClass($adapter);
+        $clientProperty = $reflection->getProperty('client');
+        $clientProperty->setAccessible(true);
+        $s3Client = $clientProperty->getValue($adapter);
+
         $bucketProperty = $reflection->getProperty('bucket');
         $bucketProperty->setAccessible(true);
         $bucketName = $bucketProperty->getValue($adapter);
@@ -497,7 +556,7 @@ class DocumentService implements DocumentServiceInterface
                 ]);
 
                 $signedUrl = (string) $s3Client->createPresignedRequest($command, "+{$expiresIn} seconds")->getUri();
-                
+
                 $signedUrls[] = [
                     'part_number' => $partNumber,
                     'signed_url' => $signedUrl,
@@ -518,7 +577,7 @@ class DocumentService implements DocumentServiceInterface
                 'upload_id' => $uploadId,
                 'error' => $e->getMessage(),
             ]);
-            
+
             throw $e;
         }
     }
