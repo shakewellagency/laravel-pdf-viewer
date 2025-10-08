@@ -49,10 +49,18 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
     public function getPageCount(string $filePath): int
     {
         try {
+            // Download file to /tmp for processing
+            $tempPath = $this->downloadToTemp($filePath);
+
+            if (!$tempPath || !file_exists($tempPath)) {
+                Log::warning('Failed to download PDF for page count', ['file_path' => $filePath]);
+                return 1;
+            }
+
             // Use a simple approach to count PDF pages
-            $pdf = file_get_contents(storage_path('app/' . $filePath));
+            $pdf = file_get_contents($tempPath);
             $pageCount = preg_match_all("/\/Page\W/", $pdf);
-            
+
             // Fallback method if the above doesn't work
             if ($pageCount === 0) {
                 $pageCount = preg_match_all("/\/Count\s+(\d+)/", $pdf, $matches);
@@ -60,6 +68,9 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
                     $pageCount = max($matches[1]);
                 }
             }
+
+            // Clean up temp file
+            @unlink($tempPath);
 
             return max(1, $pageCount); // Ensure at least 1 page
         } catch (\Exception $e) {
@@ -74,17 +85,23 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
     public function extractMetadata(string $filePath): array
     {
         try {
-            $fullPath = storage_path('app/' . $filePath);
-            
+            // Download file to /tmp for processing
+            $tempPath = $this->downloadToTemp($filePath);
+
+            if (!$tempPath || !file_exists($tempPath)) {
+                Log::warning('Failed to download PDF for metadata extraction', ['file_path' => $filePath]);
+                return ['extracted_at' => now()->toISOString()];
+            }
+
             // Basic file metadata
             $metadata = [
-                'file_size_readable' => $this->formatBytes(filesize($fullPath)),
+                'file_size_readable' => $this->formatBytes(filesize($tempPath)),
                 'extracted_at' => now()->toISOString(),
             ];
 
             // Try to extract PDF metadata using basic methods
-            $content = file_get_contents($fullPath);
-            
+            $content = file_get_contents($tempPath);
+
             // Extract title
             if (preg_match('/\/Title\s*\(([^)]+)\)/', $content, $matches)) {
                 $metadata['pdf_title'] = trim($matches[1]);
@@ -105,6 +122,9 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
                 $metadata['pdf_creation_date'] = $matches[1] . '-' . $matches[2] . '-' . $matches[3];
             }
 
+            // Clean up temp file
+            @unlink($tempPath);
+
             return $metadata;
         } catch (\Exception $e) {
             Log::warning('Failed to extract PDF metadata', [
@@ -118,16 +138,29 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
     public function validatePdf(string $filePath): bool
     {
         try {
-            $fullPath = storage_path('app/' . $filePath);
-            
-            if (!file_exists($fullPath)) {
+            $disk = config('pdf-viewer.storage.disk', 's3');
+            $storage = \Storage::disk($disk);
+
+            if (!$storage->exists($filePath)) {
+                Log::warning('PDF file does not exist', ['file_path' => $filePath]);
+                return false;
+            }
+
+            // Download file to /tmp for validation (Vapor temporary storage)
+            $tempPath = $this->downloadToTemp($filePath);
+
+            if (!$tempPath || !file_exists($tempPath)) {
+                Log::warning('Failed to download PDF to temp storage', ['file_path' => $filePath]);
                 return false;
             }
 
             // Check file header for PDF signature
-            $handle = fopen($fullPath, 'r');
+            $handle = fopen($tempPath, 'r');
             $header = fread($handle, 5);
             fclose($handle);
+
+            // Clean up temp file
+            @unlink($tempPath);
 
             return strpos($header, '%PDF') === 0;
         } catch (\Exception $e) {
@@ -136,6 +169,33 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
                 'error' => $e->getMessage(),
             ]);
             return false;
+        }
+    }
+
+    /**
+     * Download file from S3 to temporary storage for processing
+     */
+    protected function downloadToTemp(string $filePath): ?string
+    {
+        try {
+            $disk = config('pdf-viewer.storage.disk', 's3');
+            $storage = \Storage::disk($disk);
+
+            // Use /tmp directory for Vapor temporary storage
+            $tempDir = config('pdf-viewer.vapor.temp_directory', '/tmp');
+            $tempPath = $tempDir . '/' . basename($filePath) . '_' . uniqid();
+
+            // Download file from S3
+            $contents = $storage->get($filePath);
+            file_put_contents($tempPath, $contents);
+
+            return $tempPath;
+        } catch (\Exception $e) {
+            Log::error('Failed to download file to temp storage', [
+                'file_path' => $filePath,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
         }
     }
 
