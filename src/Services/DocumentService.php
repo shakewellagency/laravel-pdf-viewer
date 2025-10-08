@@ -278,7 +278,8 @@ class DocumentService implements DocumentServiceInterface
                     'endpoint' => null,
                     'use_path_style_endpoint' => $awsConfig['use_path_style_endpoint'] ?? false,
                     'throw' => false,
-                    'visibility' => 'public',
+                    // Visibility removed - bucket uses "Bucket Owner Enforced" setting
+                    // Access control managed via bucket policies
                 ]);
             }
         }
@@ -310,7 +311,8 @@ class DocumentService implements DocumentServiceInterface
             throw new \Exception('Cannot open uploaded file for reading');
         }
 
-        $success = $disk->put($filePath, $stream, 'public');
+        // Visibility option removed - bucket uses "Bucket Owner Enforced" setting
+        $success = $disk->put($filePath, $stream);
         
         if (is_resource($stream)) {
             fclose($stream);
@@ -411,11 +413,12 @@ class DocumentService implements DocumentServiceInterface
         
         try {
             // Initiate multipart upload
+            // Note: ACL removed - bucket uses "Bucket Owner Enforced" setting
+            // Access control managed via bucket policies
             $result = $s3Client->createMultipartUpload([
                 'Bucket' => $bucketName,
                 'Key' => $filePath,
                 'ContentType' => 'application/pdf',
-                'ACL' => 'public-read',
             ]);
 
             $uploadId = $result['UploadId'];
