@@ -15,6 +15,7 @@ use Shakewellagency\LaravelPdfViewer\Models\PdfPageContent;
 use Smalot\PdfParser\Parser;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
+use Spatie\PdfToText\Pdf;
 
 class PageProcessingService implements PageProcessingServiceInterface
 {
@@ -271,7 +272,7 @@ class PageProcessingService implements PageProcessingServiceInterface
     protected function extractPageTextLocally($document, int $pageNumber): string
     {
         $fullPath = storage_path('app/' . $document->file_path);
-        
+
         Log::info('Local page extraction', [
             'document_file_path' => $document->file_path,
             'full_path' => $fullPath,
@@ -279,47 +280,35 @@ class PageProcessingService implements PageProcessingServiceInterface
             'file_exists' => file_exists($fullPath),
             'file_size' => file_exists($fullPath) ? filesize($fullPath) : 'N/A',
         ]);
-        
+
         if (!file_exists($fullPath)) {
             throw new \Exception("Document file not found: {$document->file_path}");
         }
 
-        // Use smalot/pdfparser (pure PHP) to extract content from specific page
-        $parser = new Parser();
-        $pdf = $parser->parseFile($fullPath);
-        $pages = $pdf->getPages();
-        
-        Log::info('PDF pages loaded', [
-            'total_pages' => count($pages),
-            'requested_page' => $pageNumber,
-        ]);
-        
-        // Check if requested page exists (pages are 0-indexed in array, but we use 1-based numbering)
-        if (!isset($pages[$pageNumber - 1])) {
-            Log::warning('Requested page does not exist', [
-                'page_number' => $pageNumber,
-                'total_pages' => count($pages),
-            ]);
-            return '';
+        // Check for pdftotext binary
+        $pdftotextPath = $this->findPdfToTextBinary();
+        if (!$pdftotextPath) {
+            return $this->fallbackToSmalotParser($fullPath, $pageNumber);
         }
-        
-        // Get text from specific page
-        $page = $pages[$pageNumber - 1];
-        $rawText = $page->getText();
-        
-        Log::info('Raw page text extracted', [
+
+        // Memory-efficient extraction using pdftotext binary
+        $pdf = new Pdf($pdftotextPath);
+        $rawText = $pdf
+            ->setPdf($fullPath)
+            ->setOptions(['-f ' . $pageNumber, '-l ' . $pageNumber])
+            ->text();
+
+        Log::info('Page text extracted with pdftotext', [
             'page_number' => $pageNumber,
             'raw_text_length' => strlen($rawText),
-            'raw_first_200_chars' => substr($rawText, 0, 200),
         ]);
 
         // Clean up the extracted text
         $text = $this->cleanExtractedText($rawText);
-        
+
         Log::info('After cleaning page text', [
             'page_number' => $pageNumber,
             'cleaned_text_length' => strlen($text),
-            'cleaned_first_200_chars' => substr($text, 0, 200),
         ]);
 
         return $text;
@@ -344,56 +333,44 @@ class PageProcessingService implements PageProcessingServiceInterface
         try {
             // Download PDF from S3
             $pdfContent = $disk->get($document->file_path);
-            
+
             Log::info('Downloaded from S3 for page extraction', [
                 'content_length' => strlen($pdfContent),
                 'page_number' => $pageNumber,
             ]);
-            
+
             file_put_contents($tempFile, $pdfContent);
-            
+
             Log::info('Temp file written for page extraction', [
                 'temp_file_size' => file_exists($tempFile) ? filesize($tempFile) : 0,
                 'temp_file_exists' => file_exists($tempFile),
             ]);
 
-            // Extract text from specific page using smalot/pdfparser (pure PHP)
-            $parser = new Parser();
-            $pdf = $parser->parseFile($tempFile);
-            $pages = $pdf->getPages();
-            
-            Log::info('S3 PDF pages loaded', [
-                'total_pages' => count($pages),
-                'requested_page' => $pageNumber,
-            ]);
-            
-            // Check if requested page exists
-            if (!isset($pages[$pageNumber - 1])) {
-                Log::warning('S3: Requested page does not exist', [
-                    'page_number' => $pageNumber,
-                    'total_pages' => count($pages),
-                ]);
-                
-                // Cleanup temp file
+            // Check for pdftotext binary
+            $pdftotextPath = $this->findPdfToTextBinary();
+            if (!$pdftotextPath) {
+                $result = $this->fallbackToSmalotParser($tempFile, $pageNumber);
                 if (file_exists($tempFile)) {
                     unlink($tempFile);
                 }
-                
-                return '';
+                return $result;
             }
-            
-            // Get text from specific page
-            $page = $pages[$pageNumber - 1];
-            $rawText = $page->getText();
-            
-            Log::info('S3 page text extracted', [
+
+            // Memory-efficient extraction using pdftotext binary
+            $pdf = new Pdf($pdftotextPath);
+            $rawText = $pdf
+                ->setPdf($tempFile)
+                ->setOptions(['-f ' . $pageNumber, '-l ' . $pageNumber])
+                ->text();
+
+            Log::info('S3 page text extracted with pdftotext', [
                 'page_number' => $pageNumber,
                 'raw_text_length' => strlen($rawText),
             ]);
 
             // Clean up the extracted text
             $text = $this->cleanExtractedText($rawText);
-            
+
             Log::info('S3 page text cleaned', [
                 'page_number' => $pageNumber,
                 'cleaned_text_length' => strlen($text),
@@ -823,5 +800,74 @@ class PageProcessingService implements PageProcessingServiceInterface
         ]);
 
         return $postObject;
+    }
+
+    /**
+     * Find pdftotext binary in common locations
+     */
+    protected function findPdfToTextBinary(): ?string
+    {
+        $possiblePaths = [
+            '/usr/bin/pdftotext',           // Linux standard
+            '/usr/local/bin/pdftotext',     // macOS Homebrew
+            '/opt/homebrew/bin/pdftotext',  // macOS M1 Homebrew
+            '/opt/bin/pdftotext',           // Lambda layer
+            '/var/task/bin/pdftotext',      // Lambda custom
+        ];
+
+        foreach ($possiblePaths as $path) {
+            if (file_exists($path) && is_executable($path)) {
+                return $path;
+            }
+        }
+
+        // Try using 'which' command
+        $whichOutput = shell_exec('which pdftotext 2>/dev/null');
+        if ($whichOutput) {
+            $path = trim($whichOutput);
+            if (file_exists($path) && is_executable($path)) {
+                return $path;
+            }
+        }
+
+        Log::warning('pdftotext binary not found - falling back to smalot/pdfparser');
+        return null;
+    }
+
+    /**
+     * Fallback to smalot/pdfparser when pdftotext is not available
+     */
+    protected function fallbackToSmalotParser(string $filePath, int $pageNumber): string
+    {
+        try {
+            $parser = new Parser();
+            $pdf = $parser->parseFile($filePath);
+            $pages = $pdf->getPages();
+
+            if (!isset($pages[$pageNumber - 1])) {
+                Log::warning('Page does not exist (fallback)', [
+                    'page_number' => $pageNumber,
+                    'total_pages' => count($pages),
+                ]);
+                return '';
+            }
+
+            $page = $pages[$pageNumber - 1];
+            $rawText = $page->getText();
+
+            Log::info('Fallback extraction with smalot/pdfparser', [
+                'page_number' => $pageNumber,
+                'text_length' => strlen($rawText),
+            ]);
+
+            return $this->cleanExtractedText($rawText);
+        } catch (\Exception $e) {
+            Log::error('Smalot parser fallback failed', [
+                'page_number' => $pageNumber,
+                'error' => $e->getMessage(),
+                'advice' => 'PDF may be too large for PHP memory limits. Install pdftotext binary for better performance.',
+            ]);
+            return '';
+        }
     }
 }
