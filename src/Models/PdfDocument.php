@@ -266,6 +266,46 @@ class PdfDocument extends Model
     }
 
     /**
+     * Get document outline/TOC entries
+     */
+    public function outlines(): HasMany
+    {
+        return $this->hasMany(PdfDocumentOutline::class)->orderBy('sort_order');
+    }
+
+    /**
+     * Get root outline entries (top-level TOC items)
+     */
+    public function rootOutlines(): HasMany
+    {
+        return $this->outlines()->whereNull('parent_id');
+    }
+
+    /**
+     * Get document links
+     */
+    public function links(): HasMany
+    {
+        return $this->hasMany(PdfDocumentLink::class);
+    }
+
+    /**
+     * Get internal links only
+     */
+    public function internalLinks(): HasMany
+    {
+        return $this->links()->where('type', PdfDocumentLink::TYPE_INTERNAL);
+    }
+
+    /**
+     * Get external links only
+     */
+    public function externalLinks(): HasMany
+    {
+        return $this->links()->where('type', PdfDocumentLink::TYPE_EXTERNAL);
+    }
+
+    /**
      * Get a specific metadata value by key
      */
     public function getMetadata(string $key, $default = null)
