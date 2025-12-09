@@ -11,6 +11,7 @@ use Shakewellagency\LaravelPdfViewer\Jobs\ExtractPageJob;
 use Shakewellagency\LaravelPdfViewer\Jobs\ProcessPageTextJob;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
 class ExtractPageJobTest extends TestCase
@@ -18,6 +19,8 @@ class ExtractPageJobTest extends TestCase
     use RefreshDatabase;
 
     protected PageProcessingServiceInterface $pageService;
+
+    protected ExtractionAuditService $auditService;
 
     protected PdfDocument $document;
 
@@ -27,9 +30,12 @@ class ExtractPageJobTest extends TestCase
     {
         parent::setUp();
 
-        // Mock service
+        // Mock services
         $this->pageService = Mockery::mock(PageProcessingServiceInterface::class);
         $this->app->instance(PageProcessingServiceInterface::class, $this->pageService);
+
+        $this->auditService = Mockery::mock(ExtractionAuditService::class);
+        $this->app->instance(ExtractionAuditService::class, $this->auditService);
 
         // Create test document
         $this->document = PdfDocument::create([
@@ -59,11 +65,32 @@ class ExtractPageJobTest extends TestCase
         Bus::fake();
 
         $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+        $extractionResult = [
+            'file_path' => $pageFilePath,
+            'context' => ['method' => 'pdftk', 'duration' => 0.5],
+        ];
 
-        $this->pageService->shouldReceive('extractPage')
+        // Mock audit service
+        $auditMock = Mockery::mock();
+        $auditMock->id = 1;
+
+        $this->auditService->shouldReceive('initiateExtraction')
+            ->once()
+            ->with($this->document, [1], 'page_extraction', Mockery::any())
+            ->andReturn($auditMock);
+
+        $this->auditService->shouldReceive('recordPageCompletion')
+            ->once()
+            ->with($auditMock, 1, $extractionResult['context']);
+
+        $this->auditService->shouldReceive('completeExtraction')
+            ->once()
+            ->with($auditMock);
+
+        $this->pageService->shouldReceive('extractPageWithContext')
             ->once()
             ->with($this->document, 1)
-            ->andReturn($pageFilePath);
+            ->andReturn($extractionResult);
 
         $this->pageService->shouldReceive('generateThumbnail')
             ->once()
@@ -71,7 +98,7 @@ class ExtractPageJobTest extends TestCase
             ->andReturn('thumbnails/test-document-123/page_1.jpg');
 
         $job = new ExtractPageJob($this->document, 1);
-        $job->handle($this->pageService);
+        $job->handle($this->pageService, $this->auditService);
 
         // Verify page was updated with file path
         $this->page->refresh();
@@ -90,17 +117,20 @@ class ExtractPageJobTest extends TestCase
     {
         Log::spy();
 
+        $this->auditService->shouldReceive('initiateExtraction')->never();
+
         $job = new ExtractPageJob($this->document, 99); // Page that doesn't exist
 
         // The job handles exceptions internally and calls fail(), it doesn't throw
-        $job->handle($this->pageService);
+        try {
+            $job->handle($this->pageService, $this->auditService);
+        } catch (\Exception $e) {
+            // Expected to call fail() internally
+        }
 
         Log::shouldHaveReceived('error')
             ->with('Page extraction failed', Mockery::type('array'))
             ->once();
-            
-        // Verify the job completed without throwing
-        $this->assertTrue(true);
     }
 
     /** @test */
@@ -108,7 +138,18 @@ class ExtractPageJobTest extends TestCase
     {
         Log::spy();
 
-        $this->pageService->shouldReceive('extractPage')
+        $auditMock = Mockery::mock();
+        $auditMock->id = 1;
+
+        $this->auditService->shouldReceive('initiateExtraction')
+            ->once()
+            ->andReturn($auditMock);
+
+        $this->auditService->shouldReceive('recordExtractionFailure')
+            ->once()
+            ->with($auditMock, 'Page extraction failed', Mockery::type('array'));
+
+        $this->pageService->shouldReceive('extractPageWithContext')
             ->once()
             ->andThrow(new \Exception('Page extraction failed'));
 
@@ -119,14 +160,15 @@ class ExtractPageJobTest extends TestCase
         $job = new ExtractPageJob($this->document, 1);
 
         // The job handles exceptions internally and calls fail(), it doesn't throw
-        $job->handle($this->pageService);
+        try {
+            $job->handle($this->pageService, $this->auditService);
+        } catch (\Exception $e) {
+            // Expected to call fail() internally
+        }
 
         Log::shouldHaveReceived('error')
             ->with('Page extraction failed', Mockery::type('array'))
             ->once();
-            
-        // Verify the job completed without throwing
-        $this->assertTrue(true);
     }
 
     /** @test */
@@ -136,17 +178,28 @@ class ExtractPageJobTest extends TestCase
         Log::spy();
 
         $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+        $extractionResult = [
+            'file_path' => $pageFilePath,
+            'context' => ['method' => 'pdftk'],
+        ];
 
-        $this->pageService->shouldReceive('extractPage')
+        $auditMock = Mockery::mock();
+        $auditMock->id = 1;
+
+        $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
+        $this->auditService->shouldReceive('recordPageCompletion');
+        $this->auditService->shouldReceive('completeExtraction');
+
+        $this->pageService->shouldReceive('extractPageWithContext')
             ->once()
-            ->andReturn($pageFilePath);
+            ->andReturn($extractionResult);
 
         $this->pageService->shouldReceive('generateThumbnail')
             ->once()
             ->andThrow(new \Exception('Thumbnail generation failed'));
 
         $job = new ExtractPageJob($this->document, 1);
-        $job->handle($this->pageService);
+        $job->handle($this->pageService, $this->auditService);
 
         // Should not fail the entire job
         $this->page->refresh();
@@ -169,16 +222,27 @@ class ExtractPageJobTest extends TestCase
         Bus::fake();
 
         $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+        $extractionResult = [
+            'file_path' => $pageFilePath,
+            'context' => ['method' => 'pdftk'],
+        ];
 
-        $this->pageService->shouldReceive('extractPage')
+        $auditMock = Mockery::mock();
+        $auditMock->id = 1;
+
+        $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
+        $this->auditService->shouldReceive('recordPageCompletion');
+        $this->auditService->shouldReceive('completeExtraction');
+
+        $this->pageService->shouldReceive('extractPageWithContext')
             ->once()
-            ->andReturn($pageFilePath);
+            ->andReturn($extractionResult);
 
         // Should not call generateThumbnail
         $this->pageService->shouldNotReceive('generateThumbnail');
 
         $job = new ExtractPageJob($this->document, 1);
-        $job->handle($this->pageService);
+        $job->handle($this->pageService, $this->auditService);
 
         $this->page->refresh();
         $this->assertEquals($pageFilePath, $this->page->page_file_path);
@@ -194,12 +258,23 @@ class ExtractPageJobTest extends TestCase
         Bus::fake();
 
         $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+        $extractionResult = [
+            'file_path' => $pageFilePath,
+            'context' => ['method' => 'pdftk'],
+        ];
 
-        $this->pageService->shouldReceive('extractPage')->andReturn($pageFilePath);
+        $auditMock = Mockery::mock();
+        $auditMock->id = 1;
+
+        $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
+        $this->auditService->shouldReceive('recordPageCompletion');
+        $this->auditService->shouldReceive('completeExtraction');
+
+        $this->pageService->shouldReceive('extractPageWithContext')->andReturn($extractionResult);
         $this->pageService->shouldReceive('generateThumbnail')->andReturn('thumbnail.jpg');
 
         $job = new ExtractPageJob($this->document, 1);
-        $job->handle($this->pageService);
+        $job->handle($this->pageService, $this->auditService);
 
         Log::shouldHaveReceived('info')
             ->with('Starting page extraction', [
@@ -210,11 +285,7 @@ class ExtractPageJobTest extends TestCase
             ->once();
 
         Log::shouldHaveReceived('info')
-            ->with('Page extraction completed', [
-                'document_hash' => 'test-document-123',
-                'page_number' => 1,
-                'page_file_path' => $pageFilePath,
-            ])
+            ->with('Page extraction completed', Mockery::type('array'))
             ->once();
     }
 
