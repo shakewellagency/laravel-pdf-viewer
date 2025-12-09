@@ -9,8 +9,9 @@ return new class extends Migration
     public function up(): void
     {
         // Remove JSON columns from pdf_documents table
+        // Note: Keep 'processing_progress' as it's used for job progress tracking
         Schema::table('pdf_documents', function (Blueprint $table) {
-            $table->dropColumn(['metadata', 'processing_progress']);
+            $table->dropColumn(['metadata']);
         });
 
         // Remove JSON column from pdf_document_pages table
@@ -39,7 +40,7 @@ return new class extends Migration
         // Restore JSON columns to pdf_documents table
         Schema::table('pdf_documents', function (Blueprint $table) {
             $table->json('metadata')->nullable();
-            $table->json('processing_progress')->nullable();
+            // Note: 'processing_progress' is not restored here as it was not dropped
         });
 
         // Restore JSON column to pdf_document_pages table
