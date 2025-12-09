@@ -75,14 +75,14 @@ class ExtractPageJob implements ShouldQueue
             // Record page completion in audit trail
             $auditService->recordPageCompletion($audit, $this->pageNumber, $extractionResult['context']);
 
-            // Update page with file path and extraction metadata
+            // Update page with file path
             $page->update([
                 'page_file_path' => $extractionResult['file_path'],
-                'metadata' => array_merge($page->metadata ?? [], [
-                    'extraction' => $extractionResult['context'],
-                    'extracted_at' => now()->toISOString(),
-                ]),
             ]);
+
+            // Store extraction metadata using the proper metadata relationship
+            $page->setMetadata('extraction', $extractionResult['context']);
+            $page->setMetadata('extracted_at', now()->toISOString());
 
             // Generate thumbnail if enabled
             if (config('pdf-viewer.thumbnails.enabled', true)) {
