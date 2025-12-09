@@ -25,6 +25,7 @@ class PdfDocument extends Model
         'page_count',
         'status',
         'processing_error',
+        'processing_progress',
         'processing_started_at',
         'processing_completed_at',
         'is_searchable',
@@ -34,6 +35,7 @@ class PdfDocument extends Model
     protected $casts = [
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
+        'processing_progress' => 'array',
         'is_searchable' => 'boolean',
         'file_size' => 'integer',
         'page_count' => 'integer',
