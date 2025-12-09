@@ -175,6 +175,7 @@ class ExtractPageJobTest extends TestCase
     /** @test */
     public function it_handles_thumbnail_generation_failure_gracefully()
     {
+        config(['pdf-viewer.thumbnails.enabled' => true]);
         Bus::fake();
         Log::spy();
 
