@@ -19,8 +19,10 @@ class PdfDocumentPage extends Model
     protected $fillable = [
         'pdf_document_id',
         'page_number',
+        'content',
         'page_file_path',
         'thumbnail_path',
+        'metadata',
         'status',
         'processing_error',
         'is_parsed',
@@ -28,6 +30,7 @@ class PdfDocumentPage extends Model
 
     protected $casts = [
         'page_number' => 'integer',
+        'metadata' => 'array',
         'is_parsed' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -57,7 +60,7 @@ class PdfDocumentPage extends Model
             'document_hash' => $this->document->hash ?? null,
             'document_title' => $this->document->title ?? null,
             'page_number' => $this->page_number,
-            'content' => $this->content ? $this->content->content : '',
+            'content' => $this->getContentText(),
         ];
     }
 
@@ -66,11 +69,29 @@ class PdfDocumentPage extends Model
      */
     public function shouldBeSearchable(): bool
     {
-        $hasContent = $this->content && !empty(trim($this->content->content ?? ''));
-        return $this->is_parsed && 
-               $hasContent && 
+        $hasContent = !empty(trim($this->getContentText()));
+        return $this->is_parsed &&
+               $hasContent &&
                $this->status === 'completed' &&
                optional($this->document)->is_searchable;
+    }
+
+    /**
+     * Get the content text, preferring the direct column over the relation
+     */
+    public function getContentText(): string
+    {
+        // First check the direct content column
+        if (!empty($this->attributes['content'] ?? null)) {
+            return $this->attributes['content'];
+        }
+
+        // Fall back to the content relation if exists
+        if ($this->relationLoaded('contentRecord') && $this->contentRecord) {
+            return $this->contentRecord->content ?? '';
+        }
+
+        return '';
     }
 
     /**
@@ -82,9 +103,10 @@ class PdfDocumentPage extends Model
     }
 
     /**
-     * Get the page content (stored in separate table for performance)
+     * Get the page content record (stored in separate table for performance)
+     * Note: Named 'contentRecord' to avoid conflict with 'content' column
      */
-    public function content(): HasOne
+    public function contentRecord(): HasOne
     {
         return $this->hasOne(PdfPageContent::class, 'page_id');
     }
@@ -94,8 +116,8 @@ class PdfDocumentPage extends Model
      */
     public function getSearchSnippet(string $query, int $length = 200): string
     {
-        $contentText = $this->content ? $this->content->content : '';
-        
+        $contentText = $this->getContentText();
+
         if (empty($contentText) || empty($query)) {
             return '';
         }
@@ -193,11 +215,8 @@ class PdfDocumentPage extends Model
      */
     public function scopeWithContent($query)
     {
-        return $query->whereHas('content', function ($contentQuery) {
-            $contentQuery->whereNotNull('content')
-                        ->where('content', '!=', '')
-                        ->where('content_length', '>', 0);
-        });
+        return $query->whereNotNull('content')
+                    ->where('content', '!=', '');
     }
 
     /**
