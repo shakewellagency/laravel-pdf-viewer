@@ -18,6 +18,11 @@ abstract class TestCase extends Orchestra
 {
     use RefreshDatabase, WithFaker;
 
+    /**
+     * The latest response (for compatibility with older Orchestra Testbench versions).
+     */
+    protected static ?\Illuminate\Testing\TestResponse $latestResponse = null;
+
     protected function setUp(): void
     {
         parent::setUp();
