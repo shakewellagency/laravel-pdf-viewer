@@ -272,8 +272,12 @@ class ProcessPageTextJobTest extends TestCase
         $this->pageService->shouldReceive('extractText')->andReturn($textContent);
         $this->pageService->shouldReceive('updatePageContent')
             ->with(Mockery::type(PdfDocumentPage::class), $textContent);
+        // Mock markPageProcessed to actually update the page status
         $this->pageService->shouldReceive('markPageProcessed')
-            ->with(Mockery::type(PdfDocumentPage::class));
+            ->with(Mockery::type(PdfDocumentPage::class))
+            ->andReturnUsing(function ($page) {
+                $page->update(['status' => 'completed']);
+            });
         $this->searchService->shouldReceive('indexPage');
         $this->cacheService->shouldReceive('cachePageContent');
 
@@ -357,8 +361,12 @@ class ProcessPageTextJobTest extends TestCase
         $this->pageService->shouldReceive('extractText')->andReturn($textContent);
         $this->pageService->shouldReceive('updatePageContent')
             ->with(Mockery::type(PdfDocumentPage::class), $textContent);
+        // Mock markPageProcessed to actually update the page status
         $this->pageService->shouldReceive('markPageProcessed')
-            ->with(Mockery::type(PdfDocumentPage::class));
+            ->with(Mockery::type(PdfDocumentPage::class))
+            ->andReturnUsing(function ($page) {
+                $page->update(['status' => 'completed']);
+            });
         $this->searchService->shouldReceive('indexPage');
         $this->cacheService->shouldReceive('cachePageContent');
 

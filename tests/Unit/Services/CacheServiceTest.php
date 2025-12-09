@@ -77,7 +77,12 @@ class CacheServiceTest extends TestCase
 
     public function test_invalidate_document_cache_removes_all_related_data(): void
     {
-        $hash = 'test-document-hash';
+        // Create a real document so the service can find page count
+        $document = PdfDocument::factory()->create([
+            'hash' => 'test-document-hash',
+            'page_count' => 1,
+        ]);
+        $hash = $document->hash;
 
         // Cache some data
         $this->cacheService->cacheDocumentMetadata($hash, ['title' => 'Test']);
@@ -94,12 +99,21 @@ class CacheServiceTest extends TestCase
 
     public function test_warm_document_cache_preloads_data(): void
     {
-        $document = PdfDocument::factory()
-            ->has(\Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage::class, 3)
-            ->create([
-                'title' => 'Test Document',
-                'page_count' => 3,
-            ]);
+        $document = PdfDocument::factory()->create([
+            'title' => 'Test Document',
+            'page_count' => 3,
+        ]);
+
+        // Create pages with unique page numbers using sequence
+        \Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage::factory()
+            ->sequence(
+                ['page_number' => 1],
+                ['page_number' => 2],
+                ['page_number' => 3],
+            )
+            ->count(3)
+            ->for($document, 'document')
+            ->create();
 
         $result = $this->cacheService->warmDocumentCache($document->hash);
 

@@ -8,22 +8,24 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Remove JSON columns from pdf_documents table
-        // Note: Keep 'processing_progress' as it's used for job progress tracking
-        Schema::table('pdf_documents', function (Blueprint $table) {
-            $table->dropColumn(['metadata']);
-        });
+        // Note: NOT removing 'metadata' from pdf_documents and pdf_document_pages tables
+        // as the codebase still uses these columns directly. The new normalized tables
+        // (pdf_document_metadata, pdf_page_metadata) provide an additional storage option
+        // but the legacy columns are kept for backwards compatibility.
+        //
+        // Also keeping 'processing_progress' as it's used for job progress tracking.
 
-        // Remove JSON column from pdf_document_pages table
-        Schema::table('pdf_document_pages', function (Blueprint $table) {
-            $table->dropColumn('metadata');
-        });
-
-        // Remove JSON columns from pdf_extraction_audits table
+        // Remove JSON columns from pdf_extraction_audits table only
+        // These have been fully normalized to separate tables:
+        // - pdf_audit_pages
+        // - pdf_audit_compliance_flags
+        // - pdf_audit_settings
+        // - pdf_audit_performance_metrics
+        // - pdf_audit_warnings
         Schema::table('pdf_extraction_audits', function (Blueprint $table) {
             $table->dropColumn([
                 'pages_requested',
-                'pages_completed', 
+                'pages_completed',
                 'pages_failed',
                 'compliance_flags',
                 'pdf_metadata',
@@ -37,17 +39,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        // Restore JSON columns to pdf_documents table
-        Schema::table('pdf_documents', function (Blueprint $table) {
-            $table->json('metadata')->nullable();
-            // Note: 'processing_progress' is not restored here as it was not dropped
-        });
-
-        // Restore JSON column to pdf_document_pages table
-        Schema::table('pdf_document_pages', function (Blueprint $table) {
-            $table->json('metadata')->nullable();
-        });
-
         // Restore JSON columns to pdf_extraction_audits table
         Schema::table('pdf_extraction_audits', function (Blueprint $table) {
             $table->json('pages_requested')->nullable();

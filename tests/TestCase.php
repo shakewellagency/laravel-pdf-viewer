@@ -118,7 +118,8 @@ abstract class TestCase extends Orchestra
         
         // Configure package routes
         $app['config']->set('pdf-viewer.route_prefix', 'api/pdf-viewer');
-        $app['config']->set('pdf-viewer.middleware', ['api', 'auth:sanctum']);
+        // Use 'api' middleware without auth for testing - auth guard can be configured by consuming app
+        $app['config']->set('pdf-viewer.middleware', ['api']);
     }
 
     protected function defineDatabaseMigrations()

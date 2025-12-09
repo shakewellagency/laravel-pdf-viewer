@@ -93,7 +93,7 @@ class PdfDocumentFactory extends Factory
     public function aviation(): static
     {
         $aviationFilename = 'aviation_' . $this->faker->word() . '.pdf';
-        
+
         return $this->state(fn (array $attributes) => [
             'title' => $this->faker->randomElement([
                 'Aviation Safety Manual',
