@@ -12,6 +12,7 @@ use Shakewellagency\LaravelPdfViewer\Jobs\ProcessPageTextJob;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
+use Shakewellagency\LaravelPdfViewer\Models\PdfExtractionAudit;
 use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
 class ExtractPageJobTest extends TestCase
@@ -70,8 +71,8 @@ class ExtractPageJobTest extends TestCase
             'context' => ['method' => 'pdftk', 'duration' => 0.5],
         ];
 
-        // Mock audit service
-        $auditMock = Mockery::mock();
+        // Mock audit service - must return properly typed PdfExtractionAudit
+        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
         $auditMock->id = 1;
 
         $this->auditService->shouldReceive('initiateExtraction')
@@ -138,7 +139,7 @@ class ExtractPageJobTest extends TestCase
     {
         Log::spy();
 
-        $auditMock = Mockery::mock();
+        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
         $auditMock->id = 1;
 
         $this->auditService->shouldReceive('initiateExtraction')
@@ -183,7 +184,7 @@ class ExtractPageJobTest extends TestCase
             'context' => ['method' => 'pdftk'],
         ];
 
-        $auditMock = Mockery::mock();
+        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
         $auditMock->id = 1;
 
         $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
@@ -227,7 +228,7 @@ class ExtractPageJobTest extends TestCase
             'context' => ['method' => 'pdftk'],
         ];
 
-        $auditMock = Mockery::mock();
+        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
         $auditMock->id = 1;
 
         $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
@@ -263,7 +264,7 @@ class ExtractPageJobTest extends TestCase
             'context' => ['method' => 'pdftk'],
         ];
 
-        $auditMock = Mockery::mock();
+        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
         $auditMock->id = 1;
 
         $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
