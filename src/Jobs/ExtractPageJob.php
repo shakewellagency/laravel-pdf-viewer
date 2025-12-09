@@ -186,14 +186,15 @@ class ExtractPageJob implements ShouldQueue
     protected function checkDocumentCompletion(): void
     {
         $totalPages = $this->document->page_count;
-        $completedPages = $this->document->pages()
+        $processedPages = $this->document->pages()
             ->whereIn('status', ['completed', 'failed'])
             ->count();
 
-        if ($completedPages >= $totalPages) {
+        if ($processedPages >= $totalPages) {
             // All pages have been processed (successfully or failed)
             $failedPages = $this->document->failedPages()->count();
-            
+            $completedPages = $this->document->completedPages()->count();
+
             if ($failedPages > 0) {
                 Log::warning('Document processing completed with failures', [
                     'document_hash' => $this->document->hash,
@@ -204,7 +205,7 @@ class ExtractPageJob implements ShouldQueue
 
             // Update document status based on page results
             $status = $failedPages === $totalPages ? 'failed' : 'completed';
-            
+
             $this->document->update([
                 'status' => $status,
                 'processing_completed_at' => now(),
