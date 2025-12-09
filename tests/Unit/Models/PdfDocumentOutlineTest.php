@@ -32,7 +32,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Chapter 1',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $this->assertInstanceOf(PdfDocument::class, $outline->pdfDocument);
@@ -48,7 +48,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Parent Chapter',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $childOutline = PdfDocumentOutline::create([
@@ -57,7 +57,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Child Section',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $this->assertInstanceOf(PdfDocumentOutline::class, $childOutline->parent);
@@ -73,7 +73,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Parent Chapter',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         PdfDocumentOutline::create([
@@ -82,7 +82,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Child Section 1',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         PdfDocumentOutline::create([
@@ -91,13 +91,13 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Child Section 2',
             'level' => 1,
             'destination_page' => 10,
-            'sort_order' => 1,
+            'order_index' => 1,
         ]);
 
         $this->assertCount(2, $parentOutline->children);
     }
 
-    public function test_children_are_ordered_by_sort_order(): void
+    public function test_children_are_ordered_by_order_index(): void
     {
         $document = $this->createTestDocument();
 
@@ -106,7 +106,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Parent',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         // Create children in reverse order
@@ -116,7 +116,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Second',
             'level' => 1,
             'destination_page' => 10,
-            'sort_order' => 1,
+            'order_index' => 1,
         ]);
 
         PdfDocumentOutline::create([
@@ -125,7 +125,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'First',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $children = $parentOutline->children;
@@ -143,7 +143,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Root',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         PdfDocumentOutline::create([
@@ -152,7 +152,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Child',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $rootEntries = PdfDocumentOutline::where('pdf_document_id', $document->id)
@@ -172,7 +172,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Level 0',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         PdfDocumentOutline::create([
@@ -180,7 +180,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Level 1 A',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         PdfDocumentOutline::create([
@@ -188,7 +188,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Level 1 B',
             'level' => 1,
             'destination_page' => 10,
-            'sort_order' => 1,
+            'order_index' => 1,
         ]);
 
         $level1Entries = PdfDocumentOutline::where('pdf_document_id', $document->id)
@@ -207,7 +207,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Chapter 1',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $level1 = PdfDocumentOutline::create([
@@ -216,7 +216,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Section 1.1',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $level2 = PdfDocumentOutline::create([
@@ -225,7 +225,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Subsection 1.1.1',
             'level' => 2,
             'destination_page' => 7,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $path = $level2->title_path;
@@ -245,7 +245,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Chapter 1',
             'level' => 0,
             'destination_page' => 1,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         PdfDocumentOutline::create([
@@ -254,7 +254,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Section 1.1',
             'level' => 1,
             'destination_page' => 5,
-            'sort_order' => 0,
+            'order_index' => 0,
         ]);
 
         $chapter2 = PdfDocumentOutline::create([
@@ -262,7 +262,7 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Chapter 2',
             'level' => 0,
             'destination_page' => 20,
-            'sort_order' => 1,
+            'order_index' => 1,
         ]);
 
         $tree = PdfDocumentOutline::getTreeForDocument($document->id);
@@ -284,11 +284,11 @@ class PdfDocumentOutlineTest extends TestCase
             'title' => 'Test',
             'level' => '2',
             'destination_page' => '10',
-            'sort_order' => '5',
+            'order_index' => '5',
         ]);
 
         $this->assertIsInt($outline->level);
         $this->assertIsInt($outline->destination_page);
-        $this->assertIsInt($outline->sort_order);
+        $this->assertIsInt($outline->order_index);
     }
 }

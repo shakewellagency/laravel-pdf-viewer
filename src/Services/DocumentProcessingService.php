@@ -400,7 +400,8 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
                 'title' => $entry['title'],
                 'level' => $entry['level'],
                 'destination_page' => $entry['destination_page'],
-                'sort_order' => $sortOrder,
+                'destination_type' => PdfDocumentOutline::DESTINATION_TYPE_PAGE,
+                'order_index' => $sortOrder,
             ]);
 
             // Store children recursively
@@ -438,16 +439,24 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
             $externalCount = 0;
 
             foreach ($flatLinks as $linkData) {
+                // Determine destination type based on link type
+                $destinationType = match ($linkData['type']) {
+                    PDFLinkExtractor::LINK_TYPE_INTERNAL => PdfDocumentLink::DESTINATION_TYPE_PAGE,
+                    PDFLinkExtractor::LINK_TYPE_EXTERNAL => PdfDocumentLink::DESTINATION_TYPE_EXTERNAL,
+                    default => PdfDocumentLink::DESTINATION_TYPE_PAGE,
+                };
+
                 PdfDocumentLink::create([
                     'pdf_document_id' => $document->id,
                     'source_page' => $linkData['source_page'],
-                    'type' => $linkData['type'],
+                    'type' => $linkData['type'], // Legacy field
+                    'destination_type' => $destinationType,
                     'destination_page' => $linkData['destination_page'],
                     'destination_url' => $linkData['destination_url'],
-                    'coord_x' => $linkData['coordinates']['x'],
-                    'coord_y' => $linkData['coordinates']['y'],
-                    'coord_width' => $linkData['coordinates']['width'],
-                    'coord_height' => $linkData['coordinates']['height'],
+                    'source_rect_x' => $linkData['coordinates']['x'],
+                    'source_rect_y' => $linkData['coordinates']['y'],
+                    'source_rect_width' => $linkData['coordinates']['width'],
+                    'source_rect_height' => $linkData['coordinates']['height'],
                     'coord_x_percent' => $linkData['normalized_coordinates']['x_percent'],
                     'coord_y_percent' => $linkData['normalized_coordinates']['y_percent'],
                     'coord_width_percent' => $linkData['normalized_coordinates']['width_percent'],

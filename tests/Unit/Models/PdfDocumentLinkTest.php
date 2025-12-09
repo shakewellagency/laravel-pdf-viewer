@@ -74,10 +74,10 @@ class PdfDocumentLinkTest extends TestCase
             'source_page' => 1,
             'type' => PdfDocumentLink::TYPE_INTERNAL,
             'destination_page' => 5,
-            'coord_x' => 100.5,
-            'coord_y' => 200.75,
-            'coord_width' => 150.25,
-            'coord_height' => 20.50,
+            'source_rect_x' => 100.5,
+            'source_rect_y' => 200.75,
+            'source_rect_width' => 150.25,
+            'source_rect_height' => 20.50,
         ]);
 
         $coords = $link->absolute_coordinates;
@@ -275,13 +275,13 @@ class PdfDocumentLinkTest extends TestCase
             'source_page' => '1',
             'type' => PdfDocumentLink::TYPE_INTERNAL,
             'destination_page' => '5',
-            'coord_x' => '100.5',
-            'coord_y' => '200.75',
+            'source_rect_x' => '100.5',
+            'source_rect_y' => '200.75',
         ]);
 
         $this->assertIsInt($link->source_page);
         $this->assertIsInt($link->destination_page);
-        $this->assertIsFloat($link->coord_x);
-        $this->assertIsFloat($link->coord_y);
+        $this->assertIsFloat($link->source_rect_x);
+        $this->assertIsFloat($link->source_rect_y);
     }
 }

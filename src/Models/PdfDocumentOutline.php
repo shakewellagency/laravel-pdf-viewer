@@ -11,19 +11,24 @@ class PdfDocumentOutline extends Model
 {
     use HasUuids;
 
+    public const DESTINATION_TYPE_PAGE = 'page';
+    public const DESTINATION_TYPE_NAMED = 'named';
+
     protected $fillable = [
         'pdf_document_id',
         'parent_id',
         'title',
         'level',
         'destination_page',
-        'sort_order',
+        'destination_type',
+        'destination_name',
+        'order_index',
     ];
 
     protected $casts = [
         'level' => 'integer',
         'destination_page' => 'integer',
-        'sort_order' => 'integer',
+        'order_index' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -49,7 +54,7 @@ class PdfDocumentOutline extends Model
      */
     public function children(): HasMany
     {
-        return $this->hasMany(PdfDocumentOutline::class, 'parent_id')->orderBy('sort_order');
+        return $this->hasMany(PdfDocumentOutline::class, 'parent_id')->orderBy('order_index');
     }
 
     /**
@@ -93,11 +98,27 @@ class PdfDocumentOutline extends Model
     }
 
     /**
-     * Scope to order by sort order
+     * Scope to order by order_index
      */
     public function scopeOrdered($query)
     {
-        return $query->orderBy('sort_order');
+        return $query->orderBy('order_index');
+    }
+
+    /**
+     * Check if destination is a named destination
+     */
+    public function isNamedDestination(): bool
+    {
+        return $this->destination_type === self::DESTINATION_TYPE_NAMED;
+    }
+
+    /**
+     * Check if destination is a page destination
+     */
+    public function isPageDestination(): bool
+    {
+        return $this->destination_type === self::DESTINATION_TYPE_PAGE;
     }
 
     /**
@@ -108,7 +129,7 @@ class PdfDocumentOutline extends Model
         $entries = static::where('pdf_document_id', $documentId)
             ->whereNull('parent_id')
             ->with('descendants')
-            ->orderBy('sort_order')
+            ->orderBy('order_index')
             ->get();
 
         return $entries->map(fn($entry) => static::formatTreeEntry($entry))->toArray();

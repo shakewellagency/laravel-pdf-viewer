@@ -77,7 +77,6 @@ abstract class TestCase extends Orchestra
     {
         return [
             PdfViewerServiceProvider::class,
-            \Laravel\Sanctum\SanctumServiceProvider::class,
         ];
     }
     

@@ -15,10 +15,12 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->uuid('pdf_document_id');
             $table->uuid('parent_id')->nullable(); // For hierarchical structure
-            $table->string('title');
-            $table->unsignedInteger('level')->default(0); // Nesting level (0 = top level)
+            $table->string('title', 500); // Title with max 500 chars as per spec
+            $table->tinyInteger('level')->unsigned()->default(0); // Nesting level (0 = top level)
             $table->unsignedInteger('destination_page')->nullable(); // Target page number
-            $table->unsignedInteger('sort_order')->default(0); // Order within same level
+            $table->enum('destination_type', ['page', 'named'])->default('page'); // Destination type
+            $table->string('destination_name')->nullable(); // Named destination identifier
+            $table->unsignedInteger('order_index')->default(0); // Order within same level
             $table->timestamps();
 
             // Foreign key constraints
@@ -32,10 +34,10 @@ return new class extends Migration
                 ->on('pdf_document_outlines')
                 ->onDelete('cascade');
 
-            // Indexes for performance
+            // Indexes for performance (as per spec: idx_document_level, idx_parent)
+            $table->index(['pdf_document_id', 'level'], 'idx_document_level');
+            $table->index(['parent_id'], 'idx_parent');
             $table->index(['pdf_document_id']);
-            $table->index(['pdf_document_id', 'level']);
-            $table->index(['parent_id']);
             $table->index(['destination_page']);
         });
     }
