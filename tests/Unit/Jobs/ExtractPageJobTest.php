@@ -255,6 +255,7 @@ class ExtractPageJobTest extends TestCase
     /** @test */
     public function it_logs_extraction_progress()
     {
+        config(['pdf-viewer.thumbnails.enabled' => true]);
         Log::spy();
         Bus::fake();
 
