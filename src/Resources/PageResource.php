@@ -29,8 +29,8 @@ class PageResource extends JsonResource
                 'document_hash' => $this->document->hash,
                 'page_number' => $this->page_number,
             ]) : null,
-            'created_at' => $this->created_at->toISOString(),
-            'updated_at' => $this->updated_at->toISOString(),
+            'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
 
         if ($this->status === 'failed') {
