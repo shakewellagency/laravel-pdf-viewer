@@ -149,8 +149,8 @@ class PdfDocumentPage extends Model
      */
     public function highlightContent(string $query, string $tag = 'mark'): string
     {
-        $contentText = $this->content ? $this->content->content : '';
-        
+        $contentText = $this->getContentText();
+
         if (empty($contentText) || empty($query)) {
             return $contentText;
         }
@@ -167,7 +167,7 @@ class PdfDocumentPage extends Model
      */
     public function getContentLengthAttribute(): int
     {
-        $contentText = $this->content ? $this->content->content : '';
+        $contentText = $this->getContentText();
         return strlen(strip_tags($contentText));
     }
 
@@ -176,8 +176,8 @@ class PdfDocumentPage extends Model
      */
     public function getWordCountAttribute(): int
     {
-        $contentText = $this->content ? $this->content->content : '';
-        
+        $contentText = $this->getContentText();
+
         if (empty($contentText)) {
             return 0;
         }
@@ -190,7 +190,7 @@ class PdfDocumentPage extends Model
      */
     public function hasContent(): bool
     {
-        $contentText = $this->content ? $this->content->content : '';
+        $contentText = $this->getContentText();
         return !empty($contentText) && trim($contentText) !== '';
     }
 
