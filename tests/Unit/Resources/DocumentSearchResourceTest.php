@@ -1,202 +1,182 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Resources;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentSearchResource;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class DocumentSearchResourceTest extends TestCase
-{
-    use RefreshDatabase;
+it('transforms search result to array', function () {
+    $document = PdfDocument::factory()->create([
+        'title' => 'Search Test Document',
+        'original_filename' => 'search-test.pdf',
+        'file_size' => 2048,
+        'page_count' => 10,
+        'status' => 'completed',
+        'is_searchable' => true,
+        'metadata' => ['author' => 'Search Author'],
+    ]);
 
-    public function test_transforms_search_result_to_array(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'title' => 'Search Test Document',
-            'original_filename' => 'search-test.pdf',
-            'file_size' => 2048,
-            'page_count' => 10,
-            'status' => 'completed',
-            'is_searchable' => true,
-            'metadata' => ['author' => 'Search Author'],
-        ]);
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertEquals($document->id, $result['id']);
-        $this->assertEquals($document->hash, $result['hash']);
-        $this->assertEquals('Search Test Document', $result['title']);
-        $this->assertEquals('search-test.pdf', $result['filename']);
-        $this->assertEquals(2048, $result['file_size']);
-        $this->assertEquals(10, $result['page_count']);
-        $this->assertEquals('completed', $result['status']);
-        $this->assertTrue($result['is_searchable']);
-        $this->assertEquals(['author' => 'Search Author'], $result['metadata']);
-    }
+    expect($result['id'])->toBe($document->id);
+    expect($result['hash'])->toBe($document->hash);
+    expect($result['title'])->toBe('Search Test Document');
+    expect($result['filename'])->toBe('search-test.pdf');
+    expect($result['file_size'])->toBe(2048);
+    expect($result['page_count'])->toBe(10);
+    expect($result['status'])->toBe('completed');
+    expect($result['is_searchable'])->toBeTrue();
+    expect($result['metadata'])->toBe(['author' => 'Search Author']);
+});
 
-    public function test_includes_relevance_score_when_present(): void
-    {
-        $document = PdfDocument::factory()->create();
-        $document->relevance_score = 0.8765;
+it('includes relevance score when present', function () {
+    $document = PdfDocument::factory()->create();
+    $document->relevance_score = 0.8765;
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $this->assertArrayHasKey('relevance_score', $result);
-        $this->assertEquals(0.8765, $result['relevance_score']);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_rounds_relevance_score_to_four_decimals(): void
-    {
-        $document = PdfDocument::factory()->create();
-        $document->relevance_score = 0.876543;
+    expect($result)->toHaveKey('relevance_score');
+    expect($result['relevance_score'])->toBe(0.8765);
+});
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('rounds relevance score to four decimals', function () {
+    $document = PdfDocument::factory()->create();
+    $document->relevance_score = 0.876543;
 
-        $this->assertEquals(0.8765, $result['relevance_score']);
-    }
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-    public function test_excludes_relevance_score_when_not_present(): void
-    {
-        $document = PdfDocument::factory()->create();
+    $result = $resource->toArray($request);
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    expect($result['relevance_score'])->toBe(0.8765);
+});
 
-        $this->assertArrayNotHasKey('relevance_score', $result);
-    }
+it('excludes relevance score when not present', function () {
+    $document = PdfDocument::factory()->create();
 
-    public function test_includes_search_snippets_when_present(): void
-    {
-        $document = PdfDocument::factory()->create();
-        $document->search_snippets = [
-            'Page 1: ...found aviation safety...',
-            'Page 3: ...aviation regulations...'
-        ];
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertArrayHasKey('search_snippets', $result);
-        $this->assertEquals([
-            'Page 1: ...found aviation safety...',
-            'Page 3: ...aviation regulations...'
-        ], $result['search_snippets']);
-    }
+    expect($result)->not->toHaveKey('relevance_score');
+});
 
-    public function test_excludes_search_snippets_when_not_present(): void
-    {
-        $document = PdfDocument::factory()->create();
+it('includes search snippets when present', function () {
+    $document = PdfDocument::factory()->create();
+    $document->search_snippets = [
+        'Page 1: ...found aviation safety...',
+        'Page 3: ...aviation regulations...',
+    ];
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $this->assertArrayNotHasKey('search_snippets', $result);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_includes_matching_pages_when_pages_loaded(): void
-    {
-        $document = PdfDocument::factory()
-            ->has(PdfDocumentPage::factory()->count(3), 'pages')
-            ->create();
+    expect($result)->toHaveKey('search_snippets');
+    expect($result['search_snippets'])->toBe([
+        'Page 1: ...found aviation safety...',
+        'Page 3: ...aviation regulations...',
+    ]);
+});
 
-        // Load the relationship
-        $document->load('pages');
+it('excludes search snippets when not present', function () {
+    $document = PdfDocument::factory()->create();
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $this->assertArrayHasKey('matching_pages', $result);
-        $this->assertEquals(3, $result['matching_pages']);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_excludes_matching_pages_when_pages_not_loaded(): void
-    {
-        $document = PdfDocument::factory()->create();
+    expect($result)->not->toHaveKey('search_snippets');
+});
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('includes matching pages when pages loaded', function () {
+    $document = PdfDocument::factory()
+        ->has(PdfDocumentPage::factory()->count(3), 'pages')
+        ->create();
 
-        $this->assertArrayNotHasKey('matching_pages', $result);
-    }
+    // Load the relationship
+    $document->load('pages');
 
-    public function test_formats_timestamps_properly(): void
-    {
-        $document = PdfDocument::factory()->create();
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertIsString($result['created_at']);
-        $this->assertIsString($result['updated_at']);
-        $this->assertStringStartsWith($document->created_at->format('Y-m-d\TH:i:s'), $result['created_at']);
-        $this->assertStringStartsWith($document->updated_at->format('Y-m-d\TH:i:s'), $result['updated_at']);
-    }
+    expect($result)->toHaveKey('matching_pages');
+    expect($result['matching_pages'])->toBe(3);
+});
 
-    public function test_includes_formatted_file_size(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'file_size' => 1048576, // 1MB
-        ]);
+it('excludes matching pages when pages not loaded', function () {
+    $document = PdfDocument::factory()->create();
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
 
-        $this->assertArrayHasKey('formatted_file_size', $result);
-        $this->assertEquals($document->formatted_file_size, $result['formatted_file_size']);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_handles_complex_search_data(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'title' => 'Aviation Manual',
-            'is_searchable' => true,
-        ]);
-        
-        // Simulate search result data
-        $document->relevance_score = 0.95;
-        $document->search_snippets = [
-            'Page 5: ...aircraft maintenance procedures...',
-            'Page 12: ...safety protocols for aviation...',
-            'Page 18: ...flight operations manual...'
-        ];
-        
-        $document->load('pages');
+    expect($result)->not->toHaveKey('matching_pages');
+});
 
-        $resource = new DocumentSearchResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('formats timestamps properly', function () {
+    $document = PdfDocument::factory()->create();
 
-        $this->assertTrue($result['is_searchable']);
-        $this->assertEquals(0.95, $result['relevance_score']);
-        $this->assertCount(3, $result['search_snippets']);
-        $this->assertArrayHasKey('matching_pages', $result);
-    }
-}
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result['created_at'])->toBeString();
+    expect($result['updated_at'])->toBeString();
+    expect($result['created_at'])->toStartWith($document->created_at->format('Y-m-d\TH:i:s'));
+    expect($result['updated_at'])->toStartWith($document->updated_at->format('Y-m-d\TH:i:s'));
+});
+
+it('includes formatted file size', function () {
+    $document = PdfDocument::factory()->create([
+        'file_size' => 1048576, // 1MB
+    ]);
+
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result)->toHaveKey('formatted_file_size');
+    expect($result['formatted_file_size'])->toBe($document->formatted_file_size);
+});
+
+it('handles complex search data', function () {
+    $document = PdfDocument::factory()->create([
+        'title' => 'Aviation Manual',
+        'is_searchable' => true,
+    ]);
+
+    // Simulate search result data
+    $document->relevance_score = 0.95;
+    $document->search_snippets = [
+        'Page 5: ...aircraft maintenance procedures...',
+        'Page 12: ...safety protocols for aviation...',
+        'Page 18: ...flight operations manual...',
+    ];
+
+    $document->load('pages');
+
+    $resource = new DocumentSearchResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result['is_searchable'])->toBeTrue();
+    expect($result['relevance_score'])->toBe(0.95);
+    expect($result['search_snippets'])->toHaveCount(3);
+    expect($result)->toHaveKey('matching_pages');
+});

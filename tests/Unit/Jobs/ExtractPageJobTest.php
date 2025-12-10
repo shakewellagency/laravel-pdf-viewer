@@ -1,8 +1,5 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Jobs;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Mockery;
@@ -11,412 +8,373 @@ use Shakewellagency\LaravelPdfViewer\Jobs\ExtractPageJob;
 use Shakewellagency\LaravelPdfViewer\Jobs\ProcessPageTextJob;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
-use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 use Shakewellagency\LaravelPdfViewer\Models\PdfExtractionAudit;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 
-class ExtractPageJobTest extends TestCase
-{
-    use RefreshDatabase;
+beforeEach(function () {
+    // Mock services
+    $this->pageService = Mockery::mock(PageProcessingServiceInterface::class);
+    $this->app->instance(PageProcessingServiceInterface::class, $this->pageService);
 
-    protected PageProcessingServiceInterface $pageService;
+    $this->auditService = Mockery::mock(ExtractionAuditService::class);
+    $this->app->instance(ExtractionAuditService::class, $this->auditService);
 
-    protected ExtractionAuditService $auditService;
+    // Create test document
+    $this->document = PdfDocument::create([
+        'hash' => 'test-document-123',
+        'title' => 'Test Document',
+        'filename' => 'test.pdf',
+        'original_filename' => 'test.pdf',
+        'file_path' => 'pdf-documents/test.pdf',
+        'file_size' => 1024,
+        'mime_type' => 'application/pdf',
+        'page_count' => 3,
+        'status' => 'processing',
+    ]);
 
-    protected PdfDocument $document;
+    // Create test page
+    $this->page = PdfDocumentPage::create([
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 1,
+        'status' => 'pending',
+    ]);
+});
 
-    protected PdfDocumentPage $page;
+afterEach(function () {
+    Mockery::close();
+});
 
-    protected function setUp(): void
-    {
-        parent::setUp();
+it('extracts page successfully', function () {
+    config(['pdf-viewer.thumbnails.enabled' => true]);
+    Bus::fake();
 
-        // Mock services
-        $this->pageService = Mockery::mock(PageProcessingServiceInterface::class);
-        $this->app->instance(PageProcessingServiceInterface::class, $this->pageService);
+    $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+    $extractionResult = [
+        'file_path' => $pageFilePath,
+        'context' => ['method' => 'pdftk', 'duration' => 0.5],
+    ];
 
-        $this->auditService = Mockery::mock(ExtractionAuditService::class);
-        $this->app->instance(ExtractionAuditService::class, $this->auditService);
+    // Mock audit service - must return properly typed PdfExtractionAudit
+    $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
+    $auditMock->id = 1;
 
-        // Create test document
-        $this->document = PdfDocument::create([
-            'hash' => 'test-document-123',
-            'title' => 'Test Document',
-            'filename' => 'test.pdf',
-            'original_filename' => 'test.pdf',
-            'file_path' => 'pdf-documents/test.pdf',
-            'file_size' => 1024,
-            'mime_type' => 'application/pdf',
-            'page_count' => 3,
-            'status' => 'processing',
-        ]);
+    $this->auditService->shouldReceive('initiateExtraction')
+        ->once()
+        ->with($this->document, [1], 'page_extraction', Mockery::any())
+        ->andReturn($auditMock);
 
-        // Create test page
-        $this->page = PdfDocumentPage::create([
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 1,
-            'status' => 'pending',
-        ]);
-    }
+    $this->auditService->shouldReceive('recordPageCompletion')
+        ->once()
+        ->with($auditMock, 1, $extractionResult['context']);
 
-    /** @test */
-    public function it_extracts_page_successfully()
-    {
-        config(['pdf-viewer.thumbnails.enabled' => true]);
-        Bus::fake();
+    $this->auditService->shouldReceive('completeExtraction')
+        ->once()
+        ->with($auditMock);
 
-        $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
-        $extractionResult = [
-            'file_path' => $pageFilePath,
-            'context' => ['method' => 'pdftk', 'duration' => 0.5],
-        ];
+    $this->pageService->shouldReceive('extractPageWithContext')
+        ->once()
+        ->with($this->document, 1)
+        ->andReturn($extractionResult);
 
-        // Mock audit service - must return properly typed PdfExtractionAudit
-        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
-        $auditMock->id = 1;
+    $this->pageService->shouldReceive('generateThumbnail')
+        ->once()
+        ->with($pageFilePath, 300, 400)
+        ->andReturn('thumbnails/test-document-123/page_1.jpg');
 
-        $this->auditService->shouldReceive('initiateExtraction')
-            ->once()
-            ->with($this->document, [1], 'page_extraction', Mockery::any())
-            ->andReturn($auditMock);
+    $job = new ExtractPageJob($this->document, 1);
+    $job->handle($this->pageService, $this->auditService);
 
-        $this->auditService->shouldReceive('recordPageCompletion')
-            ->once()
-            ->with($auditMock, 1, $extractionResult['context']);
+    // Verify page was updated with file path
+    $this->page->refresh();
+    expect($this->page->status)->toBe('processing');
+    expect($this->page->page_file_path)->toBe($pageFilePath);
+    expect($this->page->thumbnail_path)->toBe('thumbnails/test-document-123/page_1.jpg');
 
-        $this->auditService->shouldReceive('completeExtraction')
-            ->once()
-            ->with($auditMock);
+    // Verify ProcessPageTextJob was dispatched
+    Bus::assertDispatched(ProcessPageTextJob::class, function ($job) {
+        return $job->page->id === $this->page->id;
+    });
+});
 
-        $this->pageService->shouldReceive('extractPageWithContext')
-            ->once()
-            ->with($this->document, 1)
-            ->andReturn($extractionResult);
+it('handles page not found', function () {
+    Log::spy();
 
-        $this->pageService->shouldReceive('generateThumbnail')
-            ->once()
-            ->with($pageFilePath, 300, 400)
-            ->andReturn('thumbnails/test-document-123/page_1.jpg');
+    $this->auditService->shouldReceive('initiateExtraction')->never();
 
-        $job = new ExtractPageJob($this->document, 1);
+    $job = new ExtractPageJob($this->document, 99); // Page that doesn't exist
+
+    // The job handles exceptions internally and calls fail(), it doesn't throw
+    try {
         $job->handle($this->pageService, $this->auditService);
-
-        // Verify page was updated with file path
-        $this->page->refresh();
-        $this->assertEquals('processing', $this->page->status);
-        $this->assertEquals($pageFilePath, $this->page->page_file_path);
-        $this->assertEquals('thumbnails/test-document-123/page_1.jpg', $this->page->thumbnail_path);
-
-        // Verify ProcessPageTextJob was dispatched
-        Bus::assertDispatched(ProcessPageTextJob::class, function ($job) {
-            return $job->page->id === $this->page->id;
-        });
+    } catch (\Exception $e) {
+        // Expected to call fail() internally
     }
 
-    /** @test */
-    public function it_handles_page_not_found()
-    {
-        Log::spy();
+    Log::shouldHaveReceived('error')
+        ->with('Page extraction failed', Mockery::type('array'))
+        ->once();
 
-        $this->auditService->shouldReceive('initiateExtraction')->never();
+    expect(true)->toBeTrue(); // Job handled page not found gracefully
+});
 
-        $job = new ExtractPageJob($this->document, 99); // Page that doesn't exist
+it('handles page extraction failure', function () {
+    Log::spy();
 
-        // The job handles exceptions internally and calls fail(), it doesn't throw
-        try {
-            $job->handle($this->pageService, $this->auditService);
-        } catch (\Exception $e) {
-            // Expected to call fail() internally
-        }
+    $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
+    $auditMock->id = 1;
 
-        Log::shouldHaveReceived('error')
-            ->with('Page extraction failed', Mockery::type('array'))
-            ->once();
-    }
+    $this->auditService->shouldReceive('initiateExtraction')
+        ->once()
+        ->andReturn($auditMock);
 
-    /** @test */
-    public function it_handles_page_extraction_failure()
-    {
-        Log::spy();
+    $this->auditService->shouldReceive('recordExtractionFailure')
+        ->once()
+        ->with($auditMock, 'Page extraction failed', Mockery::type('array'));
 
-        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
-        $auditMock->id = 1;
+    $this->pageService->shouldReceive('extractPageWithContext')
+        ->once()
+        ->andThrow(new \Exception('Page extraction failed'));
 
-        $this->auditService->shouldReceive('initiateExtraction')
-            ->once()
-            ->andReturn($auditMock);
+    $this->pageService->shouldReceive('handlePageFailure')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class), 'Page extraction failed');
 
-        $this->auditService->shouldReceive('recordExtractionFailure')
-            ->once()
-            ->with($auditMock, 'Page extraction failed', Mockery::type('array'));
+    $job = new ExtractPageJob($this->document, 1);
 
-        $this->pageService->shouldReceive('extractPageWithContext')
-            ->once()
-            ->andThrow(new \Exception('Page extraction failed'));
-
-        $this->pageService->shouldReceive('handlePageFailure')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class), 'Page extraction failed');
-
-        $job = new ExtractPageJob($this->document, 1);
-
-        // The job handles exceptions internally and calls fail(), it doesn't throw
-        try {
-            $job->handle($this->pageService, $this->auditService);
-        } catch (\Exception $e) {
-            // Expected to call fail() internally
-        }
-
-        Log::shouldHaveReceived('error')
-            ->with('Page extraction failed', Mockery::type('array'))
-            ->once();
-    }
-
-    /** @test */
-    public function it_handles_thumbnail_generation_failure_gracefully()
-    {
-        config(['pdf-viewer.thumbnails.enabled' => true]);
-        Bus::fake();
-        Log::spy();
-
-        $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
-        $extractionResult = [
-            'file_path' => $pageFilePath,
-            'context' => ['method' => 'pdftk'],
-        ];
-
-        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
-        $auditMock->id = 1;
-
-        $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
-        $this->auditService->shouldReceive('recordPageCompletion');
-        $this->auditService->shouldReceive('completeExtraction');
-
-        $this->pageService->shouldReceive('extractPageWithContext')
-            ->once()
-            ->andReturn($extractionResult);
-
-        $this->pageService->shouldReceive('generateThumbnail')
-            ->once()
-            ->andThrow(new \Exception('Thumbnail generation failed'));
-
-        $job = new ExtractPageJob($this->document, 1);
+    // The job handles exceptions internally and calls fail(), it doesn't throw
+    try {
         $job->handle($this->pageService, $this->auditService);
-
-        // Should not fail the entire job
-        $this->page->refresh();
-        $this->assertEquals($pageFilePath, $this->page->page_file_path);
-        $this->assertNull($this->page->thumbnail_path);
-
-        // Should log warning but continue (may have additional warnings from metadata)
-        Log::shouldHaveReceived('warning')
-            ->with('Thumbnail generation failed', Mockery::type('array'));
-
-        // Should still dispatch text processing job
-        Bus::assertDispatched(ProcessPageTextJob::class);
+    } catch (\Exception $e) {
+        // Expected to call fail() internally
     }
 
-    /** @test */
-    public function it_skips_thumbnail_generation_when_disabled()
-    {
-        config(['pdf-viewer.thumbnails.enabled' => false]);
-        Bus::fake();
+    Log::shouldHaveReceived('error')
+        ->with('Page extraction failed', Mockery::type('array'))
+        ->once();
 
-        $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
-        $extractionResult = [
-            'file_path' => $pageFilePath,
-            'context' => ['method' => 'pdftk'],
-        ];
+    expect(true)->toBeTrue(); // Job handled extraction failure gracefully
+});
 
-        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
-        $auditMock->id = 1;
+it('handles thumbnail generation failure gracefully', function () {
+    config(['pdf-viewer.thumbnails.enabled' => true]);
+    Bus::fake();
+    Log::spy();
 
-        $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
-        $this->auditService->shouldReceive('recordPageCompletion');
-        $this->auditService->shouldReceive('completeExtraction');
+    $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+    $extractionResult = [
+        'file_path' => $pageFilePath,
+        'context' => ['method' => 'pdftk'],
+    ];
 
-        $this->pageService->shouldReceive('extractPageWithContext')
-            ->once()
-            ->andReturn($extractionResult);
+    $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
+    $auditMock->id = 1;
 
-        // Should not call generateThumbnail
-        $this->pageService->shouldNotReceive('generateThumbnail');
+    $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
+    $this->auditService->shouldReceive('recordPageCompletion');
+    $this->auditService->shouldReceive('completeExtraction');
 
-        $job = new ExtractPageJob($this->document, 1);
-        $job->handle($this->pageService, $this->auditService);
+    $this->pageService->shouldReceive('extractPageWithContext')
+        ->once()
+        ->andReturn($extractionResult);
 
-        $this->page->refresh();
-        $this->assertEquals($pageFilePath, $this->page->page_file_path);
-        $this->assertNull($this->page->thumbnail_path);
+    $this->pageService->shouldReceive('generateThumbnail')
+        ->once()
+        ->andThrow(new \Exception('Thumbnail generation failed'));
 
-        Bus::assertDispatched(ProcessPageTextJob::class);
-    }
+    $job = new ExtractPageJob($this->document, 1);
+    $job->handle($this->pageService, $this->auditService);
 
-    /** @test */
-    public function it_logs_extraction_progress()
-    {
-        config(['pdf-viewer.thumbnails.enabled' => true]);
-        Log::spy();
-        Bus::fake();
+    // Should not fail the entire job
+    $this->page->refresh();
+    expect($this->page->page_file_path)->toBe($pageFilePath);
+    expect($this->page->thumbnail_path)->toBeNull();
 
-        $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
-        $extractionResult = [
-            'file_path' => $pageFilePath,
-            'context' => ['method' => 'pdftk'],
-        ];
+    // Should log warning but continue (may have additional warnings from metadata)
+    Log::shouldHaveReceived('warning')
+        ->with('Thumbnail generation failed', Mockery::type('array'));
 
-        $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
-        $auditMock->id = 1;
+    // Should still dispatch text processing job
+    Bus::assertDispatched(ProcessPageTextJob::class);
+});
 
-        $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
-        $this->auditService->shouldReceive('recordPageCompletion');
-        $this->auditService->shouldReceive('completeExtraction');
+it('skips thumbnail generation when disabled', function () {
+    config(['pdf-viewer.thumbnails.enabled' => false]);
+    Bus::fake();
 
-        $this->pageService->shouldReceive('extractPageWithContext')->andReturn($extractionResult);
-        $this->pageService->shouldReceive('generateThumbnail')->andReturn('thumbnail.jpg');
+    $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+    $extractionResult = [
+        'file_path' => $pageFilePath,
+        'context' => ['method' => 'pdftk'],
+    ];
 
-        $job = new ExtractPageJob($this->document, 1);
-        $job->handle($this->pageService, $this->auditService);
+    $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
+    $auditMock->id = 1;
 
-        // Verify logging occurred - use Mockery::any() for flexibility
-        Log::shouldHaveReceived('info')
-            ->with('Starting page extraction', Mockery::type('array'))
-            ->atLeast()->once();
+    $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
+    $this->auditService->shouldReceive('recordPageCompletion');
+    $this->auditService->shouldReceive('completeExtraction');
 
-        Log::shouldHaveReceived('info')
-            ->with('Page extraction completed', Mockery::type('array'))
-            ->atLeast()->once();
-    }
+    $this->pageService->shouldReceive('extractPageWithContext')
+        ->once()
+        ->andReturn($extractionResult);
 
-    /** @test */
-    public function it_handles_permanent_failure()
-    {
-        $job = new ExtractPageJob($this->document, 1);
-        $exception = new \Exception('Permanent failure');
+    // Should not call generateThumbnail
+    $this->pageService->shouldNotReceive('generateThumbnail');
 
-        $job->failed($exception);
+    $job = new ExtractPageJob($this->document, 1);
+    $job->handle($this->pageService, $this->auditService);
 
-        $this->page->refresh();
-        $this->assertEquals('failed', $this->page->status);
-        $this->assertEquals('Permanent failure', $this->page->processing_error);
-    }
+    $this->page->refresh();
+    expect($this->page->page_file_path)->toBe($pageFilePath);
+    expect($this->page->thumbnail_path)->toBeNull();
 
-    /** @test */
-    public function it_checks_document_completion_after_failure()
-    {
-        // Create additional pages
-        PdfDocumentPage::create([
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 2,
-            'status' => 'failed',
-        ]);
+    Bus::assertDispatched(ProcessPageTextJob::class);
+});
 
-        PdfDocumentPage::create([
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 3,
-            'status' => 'failed',
-        ]);
+it('logs extraction progress', function () {
+    config(['pdf-viewer.thumbnails.enabled' => true]);
+    Log::spy();
+    Bus::fake();
 
-        $job = new ExtractPageJob($this->document, 1);
-        $exception = new \Exception('Test failure');
+    $pageFilePath = 'pdf-pages/test-document-123/page_1.pdf';
+    $extractionResult = [
+        'file_path' => $pageFilePath,
+        'context' => ['method' => 'pdftk'],
+    ];
 
-        $job->failed($exception);
+    $auditMock = Mockery::mock(PdfExtractionAudit::class)->makePartial();
+    $auditMock->id = 1;
 
-        // Should update document status when all pages completed/failed
-        $this->document->refresh();
-        $this->assertEquals('failed', $this->document->status);
-        $this->assertEquals(100, $this->document->processing_progress['progress']);
-        $this->assertEquals(3, $this->document->processing_progress['failed_pages']);
-        $this->assertFalse($this->document->is_searchable);
-    }
+    $this->auditService->shouldReceive('initiateExtraction')->andReturn($auditMock);
+    $this->auditService->shouldReceive('recordPageCompletion');
+    $this->auditService->shouldReceive('completeExtraction');
 
-    /** @test */
-    public function it_marks_document_completed_with_mixed_results()
-    {
-        // Create additional pages with mixed statuses
-        PdfDocumentPage::create([
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 2,
-            'status' => 'completed',
-        ]);
+    $this->pageService->shouldReceive('extractPageWithContext')->andReturn($extractionResult);
+    $this->pageService->shouldReceive('generateThumbnail')->andReturn('thumbnail.jpg');
 
-        PdfDocumentPage::create([
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 3,
-            'status' => 'completed',
-        ]);
+    $job = new ExtractPageJob($this->document, 1);
+    $job->handle($this->pageService, $this->auditService);
 
-        // Mock cache service for warming
-        $cacheService = Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface::class);
-        $cacheService->shouldReceive('warmDocumentCache')
-            ->once()
-            ->with($this->document->hash);
+    // Verify logging occurred - use Mockery::any() for flexibility
+    Log::shouldHaveReceived('info')
+        ->with('Starting page extraction', Mockery::type('array'))
+        ->atLeast()->once();
 
-        $this->app->instance(\Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface::class, $cacheService);
+    Log::shouldHaveReceived('info')
+        ->with('Page extraction completed', Mockery::type('array'))
+        ->atLeast()->once();
 
-        $job = new ExtractPageJob($this->document, 1);
-        $exception = new \Exception('Test failure');
+    expect(true)->toBeTrue(); // Logging verified via mock expectations
+});
 
-        $job->failed($exception);
+it('handles permanent failure', function () {
+    $job = new ExtractPageJob($this->document, 1);
+    $exception = new \Exception('Permanent failure');
 
-        // Should mark as completed since some pages succeeded
-        $this->document->refresh();
-        $this->assertEquals('completed', $this->document->status);
-        $this->assertTrue($this->document->is_searchable);
-        $this->assertEquals(1, $this->document->processing_progress['failed_pages']);
-        $this->assertEquals(2, $this->document->processing_progress['completed_pages']);
-    }
+    $job->failed($exception);
 
-    /** @test */
-    public function it_sets_correct_timeout_configuration()
-    {
-        $job = new ExtractPageJob($this->document, 1);
+    $this->page->refresh();
+    expect($this->page->status)->toBe('failed');
+    expect($this->page->processing_error)->toBe('Permanent failure');
+});
 
-        $this->assertEquals(60, $job->timeout); // Default timeout
-        $this->assertEquals(2, $job->tries); // Default tries
-        $this->assertEquals(30, $job->retryAfter); // Default retry after
-    }
+it('checks document completion after failure', function () {
+    // Create additional pages
+    PdfDocumentPage::create([
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 2,
+        'status' => 'failed',
+    ]);
 
-    /** @test */
-    public function it_respects_vapor_timeout_limits()
-    {
-        config(['pdf-viewer.vapor.enabled' => true]);
-        config(['pdf-viewer.vapor.lambda_timeout' => 900]);
-        config(['pdf-viewer.jobs.page_extraction.timeout' => 1200]); // Longer than lambda
+    PdfDocumentPage::create([
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 3,
+        'status' => 'failed',
+    ]);
 
-        $job = new ExtractPageJob($this->document, 1);
+    $job = new ExtractPageJob($this->document, 1);
+    $exception = new \Exception('Test failure');
 
-        // Should use lambda timeout minus buffer (900 - 30 = 870)
-        $this->assertEquals(870, $job->timeout);
-    }
+    $job->failed($exception);
 
-    /** @test */
-    public function it_sets_retry_until_correctly()
-    {
-        $job = new ExtractPageJob($this->document, 1);
-        $retryUntil = $job->retryUntil();
+    // Should update document status when all pages completed/failed
+    $this->document->refresh();
+    expect($this->document->status)->toBe('failed');
+    expect($this->document->processing_progress['progress'])->toBe(100);
+    expect($this->document->processing_progress['failed_pages'])->toBe(3);
+    expect($this->document->is_searchable)->toBeFalse();
+});
 
-        $this->assertInstanceOf(\DateTime::class, $retryUntil);
-        $this->assertGreaterThan(now(), $retryUntil);
-        $this->assertLessThanOrEqual(now()->addMinutes(30), $retryUntil);
-    }
+it('marks document completed with mixed results', function () {
+    // Create additional pages with mixed statuses
+    PdfDocumentPage::create([
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 2,
+        'status' => 'completed',
+    ]);
 
-    /** @test */
-    public function it_can_be_serialized_and_unserialized()
-    {
-        $job = new ExtractPageJob($this->document, 1);
+    PdfDocumentPage::create([
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 3,
+        'status' => 'completed',
+    ]);
 
-        $serialized = serialize($job);
-        $unserialized = unserialize($serialized);
+    // Mock cache service for warming
+    $cacheService = Mockery::mock(\Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface::class);
+    $cacheService->shouldReceive('warmDocumentCache')
+        ->once()
+        ->with($this->document->hash);
 
-        $this->assertInstanceOf(ExtractPageJob::class, $unserialized);
-        $this->assertEquals($this->document->id, $unserialized->document->id);
-        $this->assertEquals(1, $unserialized->pageNumber);
-    }
+    $this->app->instance(\Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface::class, $cacheService);
 
-    protected function tearDown(): void
-    {
-        Mockery::close();
-        parent::tearDown();
-    }
-}
+    $job = new ExtractPageJob($this->document, 1);
+    $exception = new \Exception('Test failure');
+
+    $job->failed($exception);
+
+    // Should mark as completed since some pages succeeded
+    $this->document->refresh();
+    expect($this->document->status)->toBe('completed');
+    expect($this->document->is_searchable)->toBeTrue();
+    expect($this->document->processing_progress['failed_pages'])->toBe(1);
+    expect($this->document->processing_progress['completed_pages'])->toBe(2);
+});
+
+it('sets correct timeout configuration', function () {
+    $job = new ExtractPageJob($this->document, 1);
+
+    expect($job->timeout)->toBe(60); // Default timeout
+    expect($job->tries)->toBe(2); // Default tries
+    expect($job->retryAfter)->toBe(30); // Default retry after
+});
+
+it('respects vapor timeout limits', function () {
+    config(['pdf-viewer.vapor.enabled' => true]);
+    config(['pdf-viewer.vapor.lambda_timeout' => 900]);
+    config(['pdf-viewer.jobs.page_extraction.timeout' => 1200]); // Longer than lambda
+
+    $job = new ExtractPageJob($this->document, 1);
+
+    // Should use lambda timeout minus buffer (900 - 30 = 870)
+    expect($job->timeout)->toBe(870);
+});
+
+it('sets retry until correctly', function () {
+    $job = new ExtractPageJob($this->document, 1);
+    $retryUntil = $job->retryUntil();
+
+    expect($retryUntil)->toBeInstanceOf(\DateTime::class);
+    expect($retryUntil)->toBeGreaterThan(now());
+    expect($retryUntil)->toBeLessThanOrEqual(now()->addMinutes(30));
+});
+
+it('can be serialized and unserialized', function () {
+    $job = new ExtractPageJob($this->document, 1);
+
+    $serialized = serialize($job);
+    $unserialized = unserialize($serialized);
+
+    expect($unserialized)->toBeInstanceOf(ExtractPageJob::class);
+    expect($unserialized->document->id)->toBe($this->document->id);
+    expect($unserialized->pageNumber)->toBe(1);
+});

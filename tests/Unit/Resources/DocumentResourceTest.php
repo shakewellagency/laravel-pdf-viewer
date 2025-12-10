@@ -1,157 +1,140 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Resources;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentResource;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class DocumentResourceTest extends TestCase
-{
-    use RefreshDatabase;
+it('transforms document to array', function () {
+    $document = PdfDocument::factory()->create([
+        'title' => 'Test Document',
+        'original_filename' => 'test.pdf',
+        'file_size' => 1024,
+        'mime_type' => 'application/pdf',
+        'page_count' => 5,
+        'status' => 'completed',
+        'is_searchable' => true,
+        'metadata' => ['author' => 'Test Author'],
+        'created_by' => 'user-123',
+    ]);
 
-    public function test_transforms_document_to_array(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'title' => 'Test Document',
-            'original_filename' => 'test.pdf',
-            'file_size' => 1024,
-            'mime_type' => 'application/pdf',
-            'page_count' => 5,
-            'status' => 'completed',
-            'is_searchable' => true,
-            'metadata' => ['author' => 'Test Author'],
-            'created_by' => 'user-123',
-        ]);
+    $resource = new DocumentResource($document);
+    $request = new Request();
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertEquals($document->id, $result['id']);
-        $this->assertEquals($document->hash, $result['hash']);
-        $this->assertEquals('Test Document', $result['title']);
-        $this->assertEquals('test.pdf', $result['filename']);
-        $this->assertEquals(1024, $result['file_size']);
-        $this->assertEquals('application/pdf', $result['mime_type']);
-        $this->assertEquals(5, $result['page_count']);
-        $this->assertEquals('completed', $result['status']);
-        $this->assertTrue($result['is_searchable']);
-        $this->assertEquals(['author' => 'Test Author'], $result['metadata']);
-        $this->assertEquals('user-123', $result['created_by']);
-    }
+    expect($result['id'])->toBe($document->id);
+    expect($result['hash'])->toBe($document->hash);
+    expect($result['title'])->toBe('Test Document');
+    expect($result['filename'])->toBe('test.pdf');
+    expect($result['file_size'])->toBe(1024);
+    expect($result['mime_type'])->toBe('application/pdf');
+    expect($result['page_count'])->toBe(5);
+    expect($result['status'])->toBe('completed');
+    expect($result['is_searchable'])->toBeTrue();
+    expect($result['metadata'])->toBe(['author' => 'Test Author']);
+    expect($result['created_by'])->toBe('user-123');
+});
 
-    public function test_includes_processing_progress_when_processing(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'processing',
-        ]);
+it('includes processing progress when processing', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'processing',
+    ]);
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentResource($document);
+    $request = new Request();
 
-        $this->assertArrayHasKey('processing_progress', $result);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_includes_processing_progress_when_failed(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'failed',
-            'processing_error' => 'Failed to process PDF',
-        ]);
+    expect($result)->toHaveKey('processing_progress');
+});
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('includes processing progress when failed', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'failed',
+        'processing_error' => 'Failed to process PDF',
+    ]);
 
-        $this->assertArrayHasKey('processing_progress', $result);
-        $this->assertArrayHasKey('processing_error', $result);
-        $this->assertEquals('Failed to process PDF', $result['processing_error']);
-    }
+    $resource = new DocumentResource($document);
+    $request = new Request();
 
-    public function test_excludes_processing_progress_when_completed(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'completed',
-        ]);
+    $result = $resource->toArray($request);
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    expect($result)->toHaveKey('processing_progress');
+    expect($result)->toHaveKey('processing_error');
+    expect($result['processing_error'])->toBe('Failed to process PDF');
+});
 
-        $this->assertArrayNotHasKey('processing_progress', $result);
-        $this->assertArrayNotHasKey('processing_error', $result);
-    }
+it('excludes processing progress when completed', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'completed',
+    ]);
 
-    public function test_includes_processing_timestamps(): void
-    {
-        $startTime = now()->subHours(2);
-        $endTime = now()->subHour();
-        
-        $document = PdfDocument::factory()->create([
-            'processing_started_at' => $startTime,
-            'processing_completed_at' => $endTime,
-        ]);
+    $resource = new DocumentResource($document);
+    $request = new Request();
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertStringStartsWith($startTime->format('Y-m-d\TH:i:s'), $result['processing_started_at']);
-        $this->assertStringStartsWith($endTime->format('Y-m-d\TH:i:s'), $result['processing_completed_at']);
-    }
+    expect($result)->not->toHaveKey('processing_progress');
+    expect($result)->not->toHaveKey('processing_error');
+});
 
-    public function test_handles_null_processing_timestamps(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'processing_started_at' => null,
-            'processing_completed_at' => null,
-        ]);
+it('includes processing timestamps', function () {
+    $startTime = now()->subHours(2);
+    $endTime = now()->subHour();
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $document = PdfDocument::factory()->create([
+        'processing_started_at' => $startTime,
+        'processing_completed_at' => $endTime,
+    ]);
 
-        $this->assertNull($result['processing_started_at']);
-        $this->assertNull($result['processing_completed_at']);
-    }
+    $resource = new DocumentResource($document);
+    $request = new Request();
 
-    public function test_formats_timestamps_properly(): void
-    {
-        $document = PdfDocument::factory()->create();
+    $result = $resource->toArray($request);
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    expect($result['processing_started_at'])->toStartWith($startTime->format('Y-m-d\TH:i:s'));
+    expect($result['processing_completed_at'])->toStartWith($endTime->format('Y-m-d\TH:i:s'));
+});
 
-        $this->assertIsString($result['created_at']);
-        $this->assertIsString($result['updated_at']);
-        $this->assertStringStartsWith($document->created_at->format('Y-m-d\TH:i:s'), $result['created_at']);
-        $this->assertStringStartsWith($document->updated_at->format('Y-m-d\TH:i:s'), $result['updated_at']);
-    }
+it('handles null processing timestamps', function () {
+    $document = PdfDocument::factory()->create([
+        'processing_started_at' => null,
+        'processing_completed_at' => null,
+    ]);
 
-    public function test_includes_formatted_file_size(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'file_size' => 2097152, // 2MB
-        ]);
+    $resource = new DocumentResource($document);
+    $request = new Request();
 
-        $resource = new DocumentResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertArrayHasKey('formatted_file_size', $result);
-        $this->assertEquals($document->formatted_file_size, $result['formatted_file_size']);
-    }
-}
+    expect($result['processing_started_at'])->toBeNull();
+    expect($result['processing_completed_at'])->toBeNull();
+});
+
+it('formats timestamps properly', function () {
+    $document = PdfDocument::factory()->create();
+
+    $resource = new DocumentResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result['created_at'])->toBeString();
+    expect($result['updated_at'])->toBeString();
+    expect($result['created_at'])->toStartWith($document->created_at->format('Y-m-d\TH:i:s'));
+    expect($result['updated_at'])->toStartWith($document->updated_at->format('Y-m-d\TH:i:s'));
+});
+
+it('includes formatted file size', function () {
+    $document = PdfDocument::factory()->create([
+        'file_size' => 2097152, // 2MB
+    ]);
+
+    $resource = new DocumentResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result)->toHaveKey('formatted_file_size');
+    expect($result['formatted_file_size'])->toBe($document->formatted_file_size);
+});

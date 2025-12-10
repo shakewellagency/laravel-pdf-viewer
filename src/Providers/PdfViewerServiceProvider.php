@@ -16,6 +16,9 @@ use Shakewellagency\LaravelPdfViewer\Services\DocumentProcessingService;
 use Shakewellagency\LaravelPdfViewer\Services\PageProcessingService;
 use Shakewellagency\LaravelPdfViewer\Services\CacheService;
 use Shakewellagency\LaravelPdfViewer\Services\SearchService;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
+use Shakewellagency\LaravelPdfViewer\Services\EdgeCaseDetectionService;
+use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
 
 class PdfViewerServiceProvider extends ServiceProvider
 {
@@ -36,6 +39,11 @@ class PdfViewerServiceProvider extends ServiceProvider
         $this->app->bind(PageProcessingServiceInterface::class, PageProcessingService::class);
         $this->app->bind(CacheServiceInterface::class, CacheService::class);
         $this->app->bind(SearchServiceInterface::class, SearchService::class);
+
+        // Bind supporting services as singletons
+        $this->app->singleton(ExtractionAuditService::class);
+        $this->app->singleton(EdgeCaseDetectionService::class);
+        $this->app->singleton(CrossReferenceService::class);
     }
 
     /**

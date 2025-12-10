@@ -246,43 +246,44 @@ class PdfDocumentPage extends Model
     }
 
     /**
-     * Get page metadata
+     * Get page metadata records (stored in separate table)
+     * Note: Named 'metadataRecords' to avoid conflict with 'metadata' column
      */
-    public function metadata(): HasMany
+    public function metadataRecords(): HasMany
     {
         return $this->hasMany(PdfPageMetadata::class);
     }
 
     /**
-     * Get a specific metadata value by key
+     * Get a specific metadata value by key from the metadata records table
      */
-    public function getMetadata(string $key, $default = null)
+    public function getMetadataByKey(string $key, $default = null)
     {
-        $metadata = $this->metadata()->where('key', $key)->first();
+        $metadata = $this->metadataRecords()->where('key', $key)->first();
         return $metadata ? $metadata->typed_value : $default;
     }
 
     /**
-     * Set a metadata value by key
+     * Set a metadata value by key in the metadata records table
      */
-    public function setMetadata(string $key, $value): PdfPageMetadata
+    public function setMetadataByKey(string $key, $value): PdfPageMetadata
     {
-        $metadata = $this->metadata()->updateOrCreate(
+        $metadata = $this->metadataRecords()->updateOrCreate(
             ['key' => $key],
             []
         );
-        
+
         $metadata->setTypedValue($value);
         $metadata->save();
-        
+
         return $metadata;
     }
 
     /**
-     * Get all metadata as associative array
+     * Get all metadata records as associative array
      */
-    public function getAllMetadata(): array
+    public function getAllMetadataRecords(): array
     {
-        return $this->metadata->pluck('typed_value', 'key')->toArray();
+        return $this->metadataRecords->pluck('typed_value', 'key')->toArray();
     }
 }

@@ -1,161 +1,142 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Services;
-
 use Illuminate\Support\Facades\Cache;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Services\CacheService;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class CacheServiceTest extends TestCase
-{
-    protected CacheService $cacheService;
+beforeEach(function () {
+    $this->cacheService = new CacheService;
+    Cache::flush();
+});
 
-    protected function setUp(): void
-    {
-        parent::setUp();
-        $this->cacheService = new CacheService;
-        Cache::flush();
-    }
+afterEach(function () {
+    Cache::flush();
+});
 
-    public function test_cache_document_metadata_stores_data(): void
-    {
-        $hash = 'test-document-hash';
-        $metadata = [
-            'id' => 1,
-            'title' => 'Test Document',
-            'page_count' => 10,
-        ];
+it('caches document metadata stores data', function () {
+    $hash = 'test-document-hash';
+    $metadata = [
+        'id' => 1,
+        'title' => 'Test Document',
+        'page_count' => 10,
+    ];
 
-        $result = $this->cacheService->cacheDocumentMetadata($hash, $metadata);
+    $result = $this->cacheService->cacheDocumentMetadata($hash, $metadata);
 
-        $this->assertTrue($result);
+    expect($result)->toBeTrue();
 
-        $cached = $this->cacheService->getCachedDocumentMetadata($hash);
-        $this->assertEquals($metadata, $cached);
-    }
+    $cached = $this->cacheService->getCachedDocumentMetadata($hash);
+    expect($cached)->toBe($metadata);
+});
 
-    public function test_get_cached_document_metadata_returns_null_when_not_exists(): void
-    {
-        $result = $this->cacheService->getCachedDocumentMetadata('non-existent-hash');
+it('returns null when document metadata not cached', function () {
+    $result = $this->cacheService->getCachedDocumentMetadata('non-existent-hash');
 
-        $this->assertNull($result);
-    }
+    expect($result)->toBeNull();
+});
 
-    public function test_cache_page_content_stores_data(): void
-    {
-        $hash = 'test-document-hash';
-        $pageNumber = 1;
-        $content = [
-            'text' => 'Page content',
-            'thumbnail_path' => 'path/to/thumbnail.jpg',
-        ];
+it('caches page content stores data', function () {
+    $hash = 'test-document-hash';
+    $pageNumber = 1;
+    $content = [
+        'text' => 'Page content',
+        'thumbnail_path' => 'path/to/thumbnail.jpg',
+    ];
 
-        $result = $this->cacheService->cachePageContent($hash, $pageNumber, $content);
+    $result = $this->cacheService->cachePageContent($hash, $pageNumber, $content);
 
-        $this->assertTrue($result);
+    expect($result)->toBeTrue();
 
-        $cached = $this->cacheService->getCachedPageContent($hash, $pageNumber);
-        $this->assertEquals($content, $cached);
-    }
+    $cached = $this->cacheService->getCachedPageContent($hash, $pageNumber);
+    expect($cached)->toBe($content);
+});
 
-    public function test_cache_search_results_stores_data(): void
-    {
-        $query = 'aviation safety';
-        $results = [
-            ['id' => 1, 'title' => 'Safety Manual'],
-            ['id' => 2, 'title' => 'Aviation Guide'],
-        ];
+it('caches search results stores data', function () {
+    $query = 'aviation safety';
+    $results = [
+        ['id' => 1, 'title' => 'Safety Manual'],
+        ['id' => 2, 'title' => 'Aviation Guide'],
+    ];
 
-        $result = $this->cacheService->cacheSearchResults($query, $results);
+    $result = $this->cacheService->cacheSearchResults($query, $results);
 
-        $this->assertTrue($result);
+    expect($result)->toBeTrue();
 
-        $cached = $this->cacheService->getCachedSearchResults($query);
-        $this->assertEquals($results, $cached);
-    }
+    $cached = $this->cacheService->getCachedSearchResults($query);
+    expect($cached)->toBe($results);
+});
 
-    public function test_invalidate_document_cache_removes_all_related_data(): void
-    {
-        // Create a real document so the service can find page count
-        $document = PdfDocument::factory()->create([
-            'hash' => 'test-document-hash',
-            'page_count' => 1,
-        ]);
-        $hash = $document->hash;
+it('invalidates document cache removes all related data', function () {
+    // Create a real document so the service can find page count
+    $document = PdfDocument::factory()->create([
+        'hash' => 'test-document-hash',
+        'page_count' => 1,
+    ]);
+    $hash = $document->hash;
 
-        // Cache some data
-        $this->cacheService->cacheDocumentMetadata($hash, ['title' => 'Test']);
-        $this->cacheService->cachePageContent($hash, 1, ['text' => 'Content']);
+    // Cache some data
+    $this->cacheService->cacheDocumentMetadata($hash, ['title' => 'Test']);
+    $this->cacheService->cachePageContent($hash, 1, ['text' => 'Content']);
 
-        $result = $this->cacheService->invalidateDocumentCache($hash);
+    $result = $this->cacheService->invalidateDocumentCache($hash);
 
-        $this->assertTrue($result);
+    expect($result)->toBeTrue();
 
-        // Verify data is removed
-        $this->assertNull($this->cacheService->getCachedDocumentMetadata($hash));
-        $this->assertNull($this->cacheService->getCachedPageContent($hash, 1));
-    }
+    // Verify data is removed
+    expect($this->cacheService->getCachedDocumentMetadata($hash))->toBeNull();
+    expect($this->cacheService->getCachedPageContent($hash, 1))->toBeNull();
+});
 
-    public function test_warm_document_cache_preloads_data(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'title' => 'Test Document',
-            'page_count' => 3,
-        ]);
+it('warms document cache preloads data', function () {
+    $document = PdfDocument::factory()->create([
+        'title' => 'Test Document',
+        'page_count' => 3,
+    ]);
 
-        // Create pages with unique page numbers using sequence
-        \Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage::factory()
-            ->sequence(
-                ['page_number' => 1],
-                ['page_number' => 2],
-                ['page_number' => 3],
-            )
-            ->count(3)
-            ->for($document, 'document')
-            ->create();
+    // Create pages with unique page numbers using sequence
+    PdfDocumentPage::factory()
+        ->sequence(
+            ['page_number' => 1],
+            ['page_number' => 2],
+            ['page_number' => 3],
+        )
+        ->count(3)
+        ->for($document, 'document')
+        ->create();
 
-        $result = $this->cacheService->warmDocumentCache($document->hash);
+    $result = $this->cacheService->warmDocumentCache($document->hash);
 
-        $this->assertTrue($result);
+    expect($result)->toBeTrue();
 
-        // Verify metadata is cached
-        $cached = $this->cacheService->getCachedDocumentMetadata($document->hash);
-        $this->assertNotNull($cached);
-        $this->assertEquals($document->title, $cached['title']);
-    }
+    // Verify metadata is cached
+    $cached = $this->cacheService->getCachedDocumentMetadata($document->hash);
+    expect($cached)->not->toBeNull();
+    expect($cached['title'])->toBe($document->title);
+});
 
-    public function test_get_cache_stats_returns_metrics(): void
-    {
-        // Add some cache data
-        $this->cacheService->cacheDocumentMetadata('hash1', ['title' => 'Doc1']);
-        $this->cacheService->cacheDocumentMetadata('hash2', ['title' => 'Doc2']);
+it('gets cache stats returns metrics', function () {
+    // Add some cache data
+    $this->cacheService->cacheDocumentMetadata('hash1', ['title' => 'Doc1']);
+    $this->cacheService->cacheDocumentMetadata('hash2', ['title' => 'Doc2']);
 
-        $stats = $this->cacheService->getCacheStats();
+    $stats = $this->cacheService->getCacheStats();
 
-        $this->assertIsArray($stats);
-        $this->assertArrayHasKey('total_keys', $stats);
-        $this->assertArrayHasKey('memory_usage', $stats);
-    }
+    expect($stats)->toBeArray();
+    expect($stats)->toHaveKey('total_keys');
+    expect($stats)->toHaveKey('memory_usage');
+});
 
-    public function test_clear_all_cache_removes_all_data(): void
-    {
-        // Add some cache data
-        $this->cacheService->cacheDocumentMetadata('hash1', ['title' => 'Doc1']);
-        $this->cacheService->cacheSearchResults('query', ['results']);
+it('clears all cache removes all data', function () {
+    // Add some cache data
+    $this->cacheService->cacheDocumentMetadata('hash1', ['title' => 'Doc1']);
+    $this->cacheService->cacheSearchResults('query', ['results']);
 
-        $result = $this->cacheService->clearAllCache();
+    $result = $this->cacheService->clearAllCache();
 
-        $this->assertTrue($result);
+    expect($result)->toBeTrue();
 
-        // Verify all data is removed
-        $this->assertNull($this->cacheService->getCachedDocumentMetadata('hash1'));
-        $this->assertNull($this->cacheService->getCachedSearchResults('query'));
-    }
-
-    protected function tearDown(): void
-    {
-        Cache::flush();
-        parent::tearDown();
-    }
-}
+    // Verify all data is removed
+    expect($this->cacheService->getCachedDocumentMetadata('hash1'))->toBeNull();
+    expect($this->cacheService->getCachedSearchResults('query'))->toBeNull();
+});

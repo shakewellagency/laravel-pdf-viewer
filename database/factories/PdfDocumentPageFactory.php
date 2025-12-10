@@ -10,11 +10,16 @@ class PdfDocumentPageFactory extends Factory
 {
     protected $model = PdfDocumentPage::class;
 
+    /**
+     * Track page numbers per document to ensure uniqueness
+     */
+    protected static array $pageNumberSequence = [];
+
     public function definition(): array
     {
         return [
             'pdf_document_id' => PdfDocument::factory(),
-            'page_number' => $this->faker->numberBetween(1, 100),
+            'page_number' => $this->faker->unique()->numberBetween(1, 10000),
             'page_file_path' => 'pdf-pages/' . $this->faker->uuid() . '/page_' . $this->faker->numberBetween(1, 100) . '.pdf',
             'thumbnail_path' => 'thumbnails/' . $this->faker->uuid() . '/page-' . $this->faker->randomNumber() . '.jpg',
             'metadata' => json_encode(['word_count' => $this->faker->numberBetween(50, 500)]),

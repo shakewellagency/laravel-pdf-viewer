@@ -1,10 +1,7 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Jobs;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Mockery;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
@@ -12,444 +9,395 @@ use Shakewellagency\LaravelPdfViewer\Contracts\SearchServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Jobs\ProcessPageTextJob;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class ProcessPageTextJobTest extends TestCase
-{
-    use RefreshDatabase;
+beforeEach(function () {
+    // Mock services
+    $this->pageService = Mockery::mock(PageProcessingServiceInterface::class);
+    $this->searchService = Mockery::mock(SearchServiceInterface::class);
+    $this->cacheService = Mockery::mock(CacheServiceInterface::class);
 
-    protected PageProcessingServiceInterface $pageService;
+    $this->app->instance(PageProcessingServiceInterface::class, $this->pageService);
+    $this->app->instance(SearchServiceInterface::class, $this->searchService);
+    $this->app->instance(CacheServiceInterface::class, $this->cacheService);
 
-    protected SearchServiceInterface $searchService;
+    // Create test document
+    $this->document = PdfDocument::create([
+        'hash' => 'test-document-123',
+        'title' => 'Test Document',
+        'filename' => 'test.pdf',
+        'original_filename' => 'test.pdf',
+        'mime_type' => 'application/pdf',
+        'file_size' => 1024000, // 1MB
+        'file_path' => 'pdf-documents/test.pdf',
+        'page_count' => 3,
+        'status' => 'processing',
+    ]);
 
-    protected CacheServiceInterface $cacheService;
+    // Create test page
+    $this->page = PdfDocumentPage::create([
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 1,
+        'status' => 'processing',
+        'page_file_path' => 'pdf-pages/test-document-123/page_1.pdf',
+    ]);
+});
 
-    protected PdfDocument $document;
+afterEach(function () {
+    Mockery::close();
+});
 
-    protected PdfDocumentPage $page;
+it('processes page text successfully', function () {
+    $textContent = 'This is extracted text content from the PDF page.';
 
-    protected function setUp(): void
-    {
-        parent::setUp();
+    $this->pageService->shouldReceive('extractText')
+        ->once()
+        ->with($this->page->page_file_path)
+        ->andReturn($textContent);
 
-        // Mock services
-        $this->pageService = Mockery::mock(PageProcessingServiceInterface::class);
-        $this->searchService = Mockery::mock(SearchServiceInterface::class);
-        $this->cacheService = Mockery::mock(CacheServiceInterface::class);
+    $this->pageService->shouldReceive('updatePageContent')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class), $textContent);
 
-        $this->app->instance(PageProcessingServiceInterface::class, $this->pageService);
-        $this->app->instance(SearchServiceInterface::class, $this->searchService);
-        $this->app->instance(CacheServiceInterface::class, $this->cacheService);
+    $this->searchService->shouldReceive('indexPage')
+        ->once()
+        ->with($this->document->hash, 1, $textContent);
 
-        // Create test document
-        $this->document = PdfDocument::create([
-            'hash' => 'test-document-123',
-            'title' => 'Test Document',
-            'filename' => 'test.pdf',
-            'original_filename' => 'test.pdf',
-            'mime_type' => 'application/pdf',
-            'file_size' => 1024000, // 1MB
-            'file_path' => 'pdf-documents/test.pdf',
-            'page_count' => 3,
-            'status' => 'processing',
-        ]);
+    $this->cacheService->shouldReceive('cachePageContent')
+        ->once()
+        ->with($this->document->hash, 1, Mockery::type('array'));
 
-        // Create test page
-        $this->page = PdfDocumentPage::create([
-            'pdf_document_id' => $this->document->id,
+    $this->pageService->shouldReceive('markPageProcessed')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class));
+
+    $job = new ProcessPageTextJob($this->page);
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
+
+    expect(true)->toBeTrue(); // Assert job completed successfully
+});
+
+it('handles missing page file path', function () {
+    Log::spy();
+
+    $this->page->update(['page_file_path' => null]);
+
+    $this->pageService->shouldReceive('handlePageFailure')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class), 'Page file path not found for page 1');
+
+    $job = new ProcessPageTextJob($this->page);
+
+    // Job handles exceptions internally and calls fail(), it doesn't throw
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
+
+    Log::shouldHaveReceived('error')
+        ->with('Text processing failed', Mockery::type('array'))
+        ->once();
+
+    // Verify the job completed without throwing
+    expect(true)->toBeTrue();
+});
+
+it('handles empty text content', function () {
+    $emptyContent = '';
+
+    $this->pageService->shouldReceive('extractText')
+        ->once()
+        ->andReturn($emptyContent);
+
+    $this->pageService->shouldReceive('updatePageContent')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class), $emptyContent);
+
+    // Should not index empty content
+    $this->searchService->shouldNotReceive('indexPage');
+
+    $this->cacheService->shouldReceive('cachePageContent')
+        ->once()
+        ->with($this->document->hash, 1, Mockery::subset([
+            'content' => $emptyContent,
+            'word_count' => 0,
+            'has_content' => false,
+        ]));
+
+    $this->pageService->shouldReceive('markPageProcessed')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class));
+
+    $job = new ProcessPageTextJob($this->page);
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
+
+    expect(true)->toBeTrue(); // Assert job completed successfully
+});
+
+it('handles text extraction failure', function () {
+    Log::spy();
+
+    $this->pageService->shouldReceive('extractText')
+        ->once()
+        ->andThrow(new \Exception('Text extraction failed'));
+
+    $this->pageService->shouldReceive('handlePageFailure')
+        ->once()
+        ->with(Mockery::type(PdfDocumentPage::class), 'Text extraction failed');
+
+    $job = new ProcessPageTextJob($this->page);
+
+    // Job handles exceptions internally and calls fail(), it doesn't throw
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
+
+    Log::shouldHaveReceived('error')
+        ->with('Text processing failed', Mockery::type('array'))
+        ->once();
+
+    // Verify the job completed without throwing
+    expect(true)->toBeTrue();
+});
+
+it('caches page content with correct metadata', function () {
+    $textContent = 'This is some test content with multiple words for testing.';
+    $expectedWordCount = str_word_count($textContent);
+
+    $this->pageService->shouldReceive('extractText')->andReturn($textContent);
+    $this->pageService->shouldReceive('updatePageContent')
+        ->with(Mockery::type(PdfDocumentPage::class), $textContent);
+    $this->pageService->shouldReceive('markPageProcessed')
+        ->with(Mockery::type(PdfDocumentPage::class));
+    $this->searchService->shouldReceive('indexPage');
+
+    $this->cacheService->shouldReceive('cachePageContent')
+        ->once()
+        ->with($this->document->hash, 1, [
+            'content' => $textContent,
             'page_number' => 1,
-            'status' => 'processing',
-            'page_file_path' => 'pdf-pages/test-document-123/page_1.pdf',
-        ]);
-    }
-
-    /** @test */
-    public function it_processes_page_text_successfully()
-    {
-        $textContent = 'This is extracted text content from the PDF page.';
-
-        $this->pageService->shouldReceive('extractText')
-            ->once()
-            ->with($this->page->page_file_path)
-            ->andReturn($textContent);
-
-        $this->pageService->shouldReceive('updatePageContent')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class), $textContent);
-
-        $this->searchService->shouldReceive('indexPage')
-            ->once()
-            ->with($this->document->hash, 1, $textContent);
-
-        $this->cacheService->shouldReceive('cachePageContent')
-            ->once()
-            ->with($this->document->hash, 1, Mockery::type('array'));
-
-        $this->pageService->shouldReceive('markPageProcessed')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class));
-
-        $job = new ProcessPageTextJob($this->page);
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
-        
-        $this->assertTrue(true); // Assert job completed successfully
-    }
-
-    /** @test */
-    public function it_handles_missing_page_file_path()
-    {
-        Log::spy();
-
-        $this->page->update(['page_file_path' => null]);
-
-        $this->pageService->shouldReceive('handlePageFailure')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class), 'Page file path not found for page 1');
-
-        $job = new ProcessPageTextJob($this->page);
-
-        // Job handles exceptions internally and calls fail(), it doesn't throw
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
-
-        Log::shouldHaveReceived('error')
-            ->with('Text processing failed', Mockery::type('array'))
-            ->once();
-            
-        // Verify the job completed without throwing
-        $this->assertTrue(true);
-    }
-
-    /** @test */
-    public function it_handles_empty_text_content()
-    {
-        $emptyContent = '';
-
-        $this->pageService->shouldReceive('extractText')
-            ->once()
-            ->andReturn($emptyContent);
-
-        $this->pageService->shouldReceive('updatePageContent')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class), $emptyContent);
-
-        // Should not index empty content
-        $this->searchService->shouldNotReceive('indexPage');
-
-        $this->cacheService->shouldReceive('cachePageContent')
-            ->once()
-            ->with($this->document->hash, 1, Mockery::subset([
-                'content' => $emptyContent,
-                'word_count' => 0,
-                'has_content' => false,
-            ]));
-
-        $this->pageService->shouldReceive('markPageProcessed')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class));
-
-        $job = new ProcessPageTextJob($this->page);
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
-        
-        $this->assertTrue(true); // Assert job completed successfully
-    }
-
-    /** @test */
-    public function it_handles_text_extraction_failure()
-    {
-        Log::spy();
-
-        $this->pageService->shouldReceive('extractText')
-            ->once()
-            ->andThrow(new \Exception('Text extraction failed'));
-
-        $this->pageService->shouldReceive('handlePageFailure')
-            ->once()
-            ->with(Mockery::type(PdfDocumentPage::class), 'Text extraction failed');
-
-        $job = new ProcessPageTextJob($this->page);
-
-        // Job handles exceptions internally and calls fail(), it doesn't throw
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
-
-        Log::shouldHaveReceived('error')
-            ->with('Text processing failed', Mockery::type('array'))
-            ->once();
-            
-        // Verify the job completed without throwing
-        $this->assertTrue(true);
-    }
-
-    /** @test */
-    public function it_caches_page_content_with_correct_metadata()
-    {
-        $textContent = 'This is some test content with multiple words for testing.';
-        $expectedWordCount = str_word_count($textContent);
-
-        $this->pageService->shouldReceive('extractText')->andReturn($textContent);
-        $this->pageService->shouldReceive('updatePageContent')
-            ->with(Mockery::type(PdfDocumentPage::class), $textContent);
-        $this->pageService->shouldReceive('markPageProcessed')
-            ->with(Mockery::type(PdfDocumentPage::class));
-        $this->searchService->shouldReceive('indexPage');
-
-        $this->cacheService->shouldReceive('cachePageContent')
-            ->once()
-            ->with($this->document->hash, 1, [
-                'content' => $textContent,
-                'page_number' => 1,
-                'word_count' => $expectedWordCount,
-                'has_content' => true,
-            ]);
-
-        $job = new ProcessPageTextJob($this->page);
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
-        
-        $this->assertTrue(true); // Assert job completed successfully
-    }
-
-    /** @test */
-    public function it_logs_processing_information()
-    {
-        Log::spy();
-
-        $textContent = 'Test content';
-
-        $this->pageService->shouldReceive('extractText')->andReturn($textContent);
-        $this->pageService->shouldReceive('updatePageContent')
-            ->with(Mockery::type(PdfDocumentPage::class), $textContent);
-        $this->pageService->shouldReceive('markPageProcessed')
-            ->with(Mockery::type(PdfDocumentPage::class));
-        $this->searchService->shouldReceive('indexPage');
-        $this->cacheService->shouldReceive('cachePageContent');
-
-        $job = new ProcessPageTextJob($this->page);
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
-
-        Log::shouldHaveReceived('info')
-            ->with('Starting text processing', [
-                'document_hash' => $this->document->hash,
-                'page_number' => 1,
-                'page_id' => $this->page->id,
-            ])
-            ->once();
-
-        Log::shouldHaveReceived('info')
-            ->with('Text processing completed', [
-                'document_hash' => $this->document->hash,
-                'page_number' => 1,
-                'content_length' => strlen($textContent),
-                'word_count' => str_word_count($textContent),
-            ])
-            ->once();
-            
-        $this->assertTrue(true); // Assert job completed successfully
-    }
-
-    /** @test */
-    public function it_checks_document_completion_after_processing()
-    {
-        // Use DB facade to avoid transaction issues
-        DB::table('pdf_document_pages')->insert([
-            'id' => fake()->uuid(),
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 2,
-            'status' => 'completed',
-            'created_at' => now(),
-            'updated_at' => now(),
+            'word_count' => $expectedWordCount,
+            'has_content' => true,
         ]);
 
-        DB::table('pdf_document_pages')->insert([
-            'id' => fake()->uuid(),
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 3,
-            'status' => 'completed',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    $job = new ProcessPageTextJob($this->page);
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
 
-        $textContent = 'Test content';
+    expect(true)->toBeTrue(); // Assert job completed successfully
+});
 
-        $this->pageService->shouldReceive('extractText')->andReturn($textContent);
-        $this->pageService->shouldReceive('updatePageContent')
-            ->with(Mockery::type(PdfDocumentPage::class), $textContent);
-        // Mock markPageProcessed to actually update the page status
-        $this->pageService->shouldReceive('markPageProcessed')
-            ->with(Mockery::type(PdfDocumentPage::class))
-            ->andReturnUsing(function ($page) {
-                $page->update(['status' => 'completed']);
-            });
-        $this->searchService->shouldReceive('indexPage');
-        $this->cacheService->shouldReceive('cachePageContent');
+it('logs processing information', function () {
+    Log::spy();
 
-        // Mock cache warming
-        $this->cacheService->shouldReceive('warmDocumentCache')
-            ->once()
-            ->with($this->document->hash);
+    $textContent = 'Test content';
 
-        $job = new ProcessPageTextJob($this->page);
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
+    $this->pageService->shouldReceive('extractText')->andReturn($textContent);
+    $this->pageService->shouldReceive('updatePageContent')
+        ->with(Mockery::type(PdfDocumentPage::class), $textContent);
+    $this->pageService->shouldReceive('markPageProcessed')
+        ->with(Mockery::type(PdfDocumentPage::class));
+    $this->searchService->shouldReceive('indexPage');
+    $this->cacheService->shouldReceive('cachePageContent');
 
-        // Should mark document as completed
-        $this->document->refresh();
-        $this->assertEquals('completed', $this->document->status);
-        $this->assertTrue($this->document->is_searchable);
-        $this->assertNotNull($this->document->processing_completed_at);
-        $this->assertEquals(3, $this->document->processing_progress['successful_pages']);
-    }
+    $job = new ProcessPageTextJob($this->page);
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
 
-    /** @test */
-    public function it_handles_all_pages_failed()
-    {
-        // Use DB facade to avoid transaction issues
-        DB::table('pdf_document_pages')->insert([
-            'id' => fake()->uuid(),
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 2,
-            'status' => 'failed',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    Log::shouldHaveReceived('info')
+        ->with('Starting text processing', [
+            'document_hash' => $this->document->hash,
+            'page_number' => 1,
+            'page_id' => $this->page->id,
+        ])
+        ->once();
 
-        DB::table('pdf_document_pages')->insert([
-            'id' => fake()->uuid(),
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 3,
-            'status' => 'failed',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    Log::shouldHaveReceived('info')
+        ->with('Text processing completed', [
+            'document_hash' => $this->document->hash,
+            'page_number' => 1,
+            'content_length' => strlen($textContent),
+            'word_count' => str_word_count($textContent),
+        ])
+        ->once();
 
-        $job = new ProcessPageTextJob($this->page);
-        $exception = new \Exception('Processing failed');
+    expect(true)->toBeTrue(); // Assert job completed successfully
+});
 
-        $job->failed($exception);
+it('checks document completion after processing', function () {
+    // Use DB facade to avoid transaction issues
+    DB::table('pdf_document_pages')->insert([
+        'id' => fake()->uuid(),
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 2,
+        'status' => 'completed',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
-        // Should mark document as failed
-        $this->document->refresh();
-        $this->assertEquals('failed', $this->document->status);
-        $this->assertFalse($this->document->is_searchable);
-        $this->assertEquals('All page processing jobs failed', $this->document->processing_error);
-        $this->assertEquals(3, $this->document->processing_progress['failed_pages']);
-    }
+    DB::table('pdf_document_pages')->insert([
+        'id' => fake()->uuid(),
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 3,
+        'status' => 'completed',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
-    /** @test */
-    public function it_handles_cache_warming_failure_gracefully()
-    {
-        Log::spy();
+    $textContent = 'Test content';
 
-        // Use DB facade to avoid transaction issues
-        DB::table('pdf_document_pages')->insert([
-            'id' => fake()->uuid(),
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 2,
-            'status' => 'completed',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    $this->pageService->shouldReceive('extractText')->andReturn($textContent);
+    $this->pageService->shouldReceive('updatePageContent')
+        ->with(Mockery::type(PdfDocumentPage::class), $textContent);
+    // Mock markPageProcessed to actually update the page status
+    $this->pageService->shouldReceive('markPageProcessed')
+        ->with(Mockery::type(PdfDocumentPage::class))
+        ->andReturnUsing(function ($page) {
+            $page->update(['status' => 'completed']);
+        });
+    $this->searchService->shouldReceive('indexPage');
+    $this->cacheService->shouldReceive('cachePageContent');
 
-        DB::table('pdf_document_pages')->insert([
-            'id' => fake()->uuid(),
-            'pdf_document_id' => $this->document->id,
-            'page_number' => 3,
-            'status' => 'completed',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    // Mock cache warming
+    $this->cacheService->shouldReceive('warmDocumentCache')
+        ->once()
+        ->with($this->document->hash);
 
-        $textContent = 'Test content';
+    $job = new ProcessPageTextJob($this->page);
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
 
-        $this->pageService->shouldReceive('extractText')->andReturn($textContent);
-        $this->pageService->shouldReceive('updatePageContent')
-            ->with(Mockery::type(PdfDocumentPage::class), $textContent);
-        // Mock markPageProcessed to actually update the page status
-        $this->pageService->shouldReceive('markPageProcessed')
-            ->with(Mockery::type(PdfDocumentPage::class))
-            ->andReturnUsing(function ($page) {
-                $page->update(['status' => 'completed']);
-            });
-        $this->searchService->shouldReceive('indexPage');
-        $this->cacheService->shouldReceive('cachePageContent');
+    // Should mark document as completed
+    $this->document->refresh();
+    expect($this->document->status)->toBe('completed');
+    expect($this->document->is_searchable)->toBeTrue();
+    expect($this->document->processing_completed_at)->not->toBeNull();
+    expect($this->document->processing_progress['successful_pages'])->toBe(3);
+});
 
-        // Mock cache warming failure
-        $this->cacheService->shouldReceive('warmDocumentCache')
-            ->once()
-            ->andThrow(new \Exception('Cache warming failed'));
+it('handles all pages failed', function () {
+    // Use DB facade to avoid transaction issues
+    DB::table('pdf_document_pages')->insert([
+        'id' => fake()->uuid(),
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 2,
+        'status' => 'failed',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
-        $job = new ProcessPageTextJob($this->page);
-        $job->handle($this->pageService, $this->searchService, $this->cacheService);
+    DB::table('pdf_document_pages')->insert([
+        'id' => fake()->uuid(),
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 3,
+        'status' => 'failed',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
-        // Should still mark document as completed despite cache failure
-        $this->document->refresh();
-        $this->assertEquals('completed', $this->document->status);
+    $job = new ProcessPageTextJob($this->page);
+    $exception = new \Exception('Processing failed');
 
-        // Should log warning
-        Log::shouldHaveReceived('warning')
-            ->with('Failed to warm cache for completed document', Mockery::type('array'))
-            ->once();
-    }
+    $job->failed($exception);
 
-    /** @test */
-    public function it_handles_permanent_failure()
-    {
-        $job = new ProcessPageTextJob($this->page);
-        $exception = new \Exception('Permanent failure');
+    // Should mark document as failed
+    $this->document->refresh();
+    expect($this->document->status)->toBe('failed');
+    expect($this->document->is_searchable)->toBeFalse();
+    expect($this->document->processing_error)->toBe('All page processing jobs failed');
+    expect($this->document->processing_progress['failed_pages'])->toBe(3);
+});
 
-        $job->failed($exception);
+it('handles cache warming failure gracefully', function () {
+    Log::spy();
 
-        $this->page->refresh();
-        $this->assertEquals('failed', $this->page->status);
-        $this->assertEquals('Permanent failure', $this->page->processing_error);
-    }
+    // Use DB facade to avoid transaction issues
+    DB::table('pdf_document_pages')->insert([
+        'id' => fake()->uuid(),
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 2,
+        'status' => 'completed',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
-    /** @test */
-    public function it_sets_correct_timeout_configuration()
-    {
-        $job = new ProcessPageTextJob($this->page);
+    DB::table('pdf_document_pages')->insert([
+        'id' => fake()->uuid(),
+        'pdf_document_id' => $this->document->id,
+        'page_number' => 3,
+        'status' => 'completed',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
-        $this->assertEquals(30, $job->timeout); // Default timeout
-        $this->assertEquals(2, $job->tries); // Default tries
-        $this->assertEquals(15, $job->retryAfter); // Default retry after
-    }
+    $textContent = 'Test content';
 
-    /** @test */
-    public function it_respects_vapor_timeout_limits()
-    {
-        config(['pdf-viewer.vapor.enabled' => true]);
-        config(['pdf-viewer.vapor.lambda_timeout' => 900]);
-        config(['pdf-viewer.jobs.text_processing.timeout' => 1200]); // Longer than lambda
+    $this->pageService->shouldReceive('extractText')->andReturn($textContent);
+    $this->pageService->shouldReceive('updatePageContent')
+        ->with(Mockery::type(PdfDocumentPage::class), $textContent);
+    // Mock markPageProcessed to actually update the page status
+    $this->pageService->shouldReceive('markPageProcessed')
+        ->with(Mockery::type(PdfDocumentPage::class))
+        ->andReturnUsing(function ($page) {
+            $page->update(['status' => 'completed']);
+        });
+    $this->searchService->shouldReceive('indexPage');
+    $this->cacheService->shouldReceive('cachePageContent');
 
-        $job = new ProcessPageTextJob($this->page);
+    // Mock cache warming failure
+    $this->cacheService->shouldReceive('warmDocumentCache')
+        ->once()
+        ->andThrow(new \Exception('Cache warming failed'));
 
-        // Should use lambda timeout minus buffer (900 - 30 = 870)
-        $this->assertEquals(870, $job->timeout);
-    }
+    $job = new ProcessPageTextJob($this->page);
+    $job->handle($this->pageService, $this->searchService, $this->cacheService);
 
-    /** @test */
-    public function it_sets_retry_until_correctly()
-    {
-        $job = new ProcessPageTextJob($this->page);
-        $retryUntil = $job->retryUntil();
+    // Should still mark document as completed despite cache failure
+    $this->document->refresh();
+    expect($this->document->status)->toBe('completed');
 
-        $this->assertInstanceOf(\DateTime::class, $retryUntil);
-        $this->assertGreaterThan(now(), $retryUntil);
-        $this->assertLessThanOrEqual(now()->addMinutes(20), $retryUntil);
-    }
+    // Should log warning
+    Log::shouldHaveReceived('warning')
+        ->with('Failed to warm cache for completed document', Mockery::type('array'))
+        ->once();
+});
 
-    /** @test */
-    public function it_can_be_serialized_and_unserialized()
-    {
-        $job = new ProcessPageTextJob($this->page);
+it('handles permanent failure', function () {
+    $job = new ProcessPageTextJob($this->page);
+    $exception = new \Exception('Permanent failure');
 
-        $serialized = serialize($job);
-        $unserialized = unserialize($serialized);
+    $job->failed($exception);
 
-        $this->assertInstanceOf(ProcessPageTextJob::class, $unserialized);
-        $this->assertEquals($this->page->id, $unserialized->page->id);
-    }
+    $this->page->refresh();
+    expect($this->page->status)->toBe('failed');
+    expect($this->page->processing_error)->toBe('Permanent failure');
+});
 
-    protected function tearDown(): void
-    {
-        Mockery::close();
-        parent::tearDown();
-    }
-}
+it('sets correct timeout configuration', function () {
+    $job = new ProcessPageTextJob($this->page);
+
+    expect($job->timeout)->toBe(30); // Default timeout
+    expect($job->tries)->toBe(2); // Default tries
+    expect($job->retryAfter)->toBe(15); // Default retry after
+});
+
+it('respects vapor timeout limits', function () {
+    config(['pdf-viewer.vapor.enabled' => true]);
+    config(['pdf-viewer.vapor.lambda_timeout' => 900]);
+    config(['pdf-viewer.jobs.text_processing.timeout' => 1200]); // Longer than lambda
+
+    $job = new ProcessPageTextJob($this->page);
+
+    // Should use lambda timeout minus buffer (900 - 30 = 870)
+    expect($job->timeout)->toBe(870);
+});
+
+it('sets retry until correctly', function () {
+    $job = new ProcessPageTextJob($this->page);
+    $retryUntil = $job->retryUntil();
+
+    expect($retryUntil)->toBeInstanceOf(\DateTime::class);
+    expect($retryUntil)->toBeGreaterThan(now());
+    expect($retryUntil)->toBeLessThanOrEqual(now()->addMinutes(20));
+});
+
+it('can be serialized and unserialized', function () {
+    $job = new ProcessPageTextJob($this->page);
+
+    $serialized = serialize($job);
+    $unserialized = unserialize($serialized);
+
+    expect($unserialized)->toBeInstanceOf(ProcessPageTextJob::class);
+    expect($unserialized->page->id)->toBe($this->page->id);
+});

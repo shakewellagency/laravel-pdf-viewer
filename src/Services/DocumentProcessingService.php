@@ -50,7 +50,7 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
 
             // Store extracted metadata in normalized structure
             foreach ($metadata as $key => $value) {
-                $document->setMetadata($key, $value);
+                $document->setMetadataByKey($key, $value);
             }
 
             // Update processing step for metadata extraction
@@ -364,7 +364,7 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
             ]);
 
             // Store outline count as metadata
-            $document->setMetadata('outline_count', $outlineCount);
+            $document->setMetadataByKey('outline_count', $outlineCount);
 
             if (config('pdf-viewer.monitoring.log_processing')) {
                 Log::info('PDF outline extracted', [
@@ -478,9 +478,9 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
             ]);
 
             // Store link counts as metadata
-            $document->setMetadata('total_links', $totalLinks);
-            $document->setMetadata('internal_links', $internalCount);
-            $document->setMetadata('external_links', $externalCount);
+            $document->setMetadataByKey('total_links', $totalLinks);
+            $document->setMetadataByKey('internal_links', $internalCount);
+            $document->setMetadataByKey('external_links', $externalCount);
 
             if (config('pdf-viewer.monitoring.log_processing')) {
                 Log::info('PDF links extracted', [

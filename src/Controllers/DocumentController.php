@@ -12,6 +12,10 @@ use Shakewellagency\LaravelPdfViewer\Requests\DocumentIndexRequest;
 use Shakewellagency\LaravelPdfViewer\Requests\DocumentUpdateRequest;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentResource;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentProgressResource;
+use Shakewellagency\LaravelPdfViewer\Resources\OutlineResource;
+use Shakewellagency\LaravelPdfViewer\Resources\LinkResource;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentOutline;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentLink;
 use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 use Shakewellagency\LaravelPdfViewer\Services\MonitoringService;
 use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
@@ -696,6 +700,103 @@ class DocumentController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to retrieve detailed progress',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get document outline (table of contents)
+     */
+    public function outline(string $documentHash): JsonResponse
+    {
+        $document = $this->documentService->findByHash($documentHash);
+
+        if (!$document) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        try {
+            // Get hierarchical outline tree
+            $outlineTree = PdfDocumentOutline::getTreeForDocument($document->id);
+
+            // Check if document has outline
+            $hasOutline = !empty($outlineTree);
+
+            // Get outline entries with children for resources
+            $outlineEntries = PdfDocumentOutline::where('pdf_document_id', $document->id)
+                ->whereNull('parent_id')
+                ->with('descendants')
+                ->orderBy('order_index')
+                ->get();
+
+            return response()->json([
+                'data' => OutlineResource::collection($outlineEntries),
+                'meta' => [
+                    'document_hash' => $document->hash,
+                    'has_outline' => $hasOutline,
+                    'total_entries' => PdfDocumentOutline::where('pdf_document_id', $document->id)->count(),
+                    'max_depth' => PdfDocumentOutline::where('pdf_document_id', $document->id)->max('level') ?? 0,
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve document outline',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get document links with statistics
+     */
+    public function links(string $documentHash): JsonResponse
+    {
+        $document = $this->documentService->findByHash($documentHash);
+
+        if (!$document) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        try {
+            // Get link statistics
+            $allLinks = PdfDocumentLink::where('pdf_document_id', $document->id)->get();
+
+            $totalLinks = $allLinks->count();
+            $internalLinks = $allLinks->where('type', 'internal')->count();
+            $externalLinks = $allLinks->where('type', 'external')->count();
+
+            // Group links by source page
+            $linksByPage = $allLinks->groupBy('source_page')->map(function ($pageLinks, $pageNumber) {
+                return [
+                    'page_number' => $pageNumber,
+                    'total' => $pageLinks->count(),
+                    'internal' => $pageLinks->where('type', 'internal')->count(),
+                    'external' => $pageLinks->where('type', 'external')->count(),
+                    'links' => LinkResource::collection($pageLinks),
+                ];
+            })->values();
+
+            return response()->json([
+                'data' => [
+                    'summary' => [
+                        'total_links' => $totalLinks,
+                        'internal_links' => $internalLinks,
+                        'external_links' => $externalLinks,
+                        'pages_with_links' => $linksByPage->count(),
+                    ],
+                    'links_by_page' => $linksByPage,
+                ],
+                'meta' => [
+                    'document_hash' => $document->hash,
+                    'has_links' => $totalLinks > 0,
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve document links',
                 'error' => $e->getMessage(),
             ], 500);
         }

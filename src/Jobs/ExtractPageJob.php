@@ -83,8 +83,8 @@ class ExtractPageJob implements ShouldQueue
             // Store extraction metadata using the proper metadata relationship
             // Wrap in try-catch to not fail the job if metadata storage fails
             try {
-                $page->setMetadata('extraction', $extractionResult['context']);
-                $page->setMetadata('extracted_at', now()->toISOString());
+                $page->setMetadataByKey('extraction', $extractionResult['context']);
+                $page->setMetadataByKey('extracted_at', now()->toISOString());
             } catch (\Exception $e) {
                 Log::warning('Failed to store extraction metadata', [
                     'document_hash' => $this->document->hash,

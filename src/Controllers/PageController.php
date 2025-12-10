@@ -10,6 +10,8 @@ use Shakewellagency\LaravelPdfViewer\Contracts\DocumentServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Requests\PageIndexRequest;
 use Shakewellagency\LaravelPdfViewer\Resources\PageResource;
+use Shakewellagency\LaravelPdfViewer\Resources\LinkResource;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentLink;
 
 class PageController extends Controller
 {
@@ -162,11 +164,53 @@ class PageController extends Controller
     }
 
     /**
+     * Get links for a specific page
+     */
+    public function links(string $documentHash, int $pageNumber): JsonResponse
+    {
+        $document = $this->documentService->findByHash($documentHash);
+
+        if (!$document) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        $page = $document->pages()->where('page_number', $pageNumber)->first();
+
+        if (!$page) {
+            return response()->json(['message' => 'Page not found'], 404);
+        }
+
+        try {
+            // Get links for this specific page
+            $links = PdfDocumentLink::where('pdf_document_id', $document->id)
+                ->where('source_page', $pageNumber)
+                ->get();
+
+            return response()->json([
+                'data' => LinkResource::collection($links),
+                'meta' => [
+                    'document_hash' => $document->hash,
+                    'page_number' => $pageNumber,
+                    'total_links' => $links->count(),
+                    'internal_links' => $links->where('type', 'internal')->count(),
+                    'external_links' => $links->where('type', 'external')->count(),
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve page links',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Check if the storage disk is S3
      */
     protected function isS3Disk($disk): bool
     {
-        return method_exists($disk->getAdapter(), 'getBucket') || 
+        return method_exists($disk->getAdapter(), 'getBucket') ||
                (config('pdf-viewer.storage.disk') === 's3');
     }
 }

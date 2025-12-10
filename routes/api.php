@@ -36,11 +36,16 @@ Route::prefix('documents')->group(function () {
     Route::post('/{document_hash}/retry', [DocumentController::class, 'retry'])->name('pdf-viewer.documents.retry');
     Route::post('/{document_hash}/cancel', [DocumentController::class, 'cancel'])->name('pdf-viewer.documents.cancel');
 
+    // Document outline and links routes
+    Route::get('/{document_hash}/outline', [DocumentController::class, 'outline'])->name('pdf-viewer.documents.outline');
+    Route::get('/{document_hash}/links', [DocumentController::class, 'links'])->name('pdf-viewer.documents.links');
+
     // Document pages routes
     Route::get('/{document_hash}/pages', [PageController::class, 'index'])->name('pdf-viewer.documents.pages.index');
     Route::get('/{document_hash}/pages/{page_number}', [PageController::class, 'show'])->name('pdf-viewer.documents.pages.show');
     Route::get('/{document_hash}/pages/{page_number}/thumbnail', [PageController::class, 'thumbnail'])->name('pdf-viewer.documents.pages.thumbnail');
     Route::get('/{document_hash}/pages/{page_number}/download', [PageController::class, 'download'])->name('pdf-viewer.documents.pages.download');
+    Route::get('/{document_hash}/pages/{page_number}/links', [PageController::class, 'links'])->name('pdf-viewer.documents.pages.links');
 
     // Compliance and audit routes
     Route::get('/{document_hash}/download-original', [DocumentController::class, 'downloadOriginal'])->name('pdf-viewer.documents.download-original');

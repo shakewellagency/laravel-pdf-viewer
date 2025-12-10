@@ -21,7 +21,7 @@ class SearchService implements SearchServiceInterface
     public function searchDocuments(string $query, array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
         $query = $this->sanitizeQuery($query);
-        
+
         if (strlen($query) < config('pdf-viewer.search.min_query_length', 3)) {
             return new LengthAwarePaginator([], 0, $perPage);
         }
@@ -29,47 +29,61 @@ class SearchService implements SearchServiceInterface
         // Check cache first
         $cacheKey = $this->generateSearchCacheKey('documents', $query, $filters, $perPage);
         $cached = $this->cacheService->getCachedSearchResults($cacheKey);
-        
+
         if ($cached) {
             return $this->paginateFromCache($cached, $perPage);
         }
 
-        // Build search query using the separated content table
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+
+        // Build search query - use simpler LIKE for SQLite, FULLTEXT for MySQL
         $searchQuery = PdfDocument::query()
             ->searchable()
-            ->whereHas('pages.content', function (Builder $contentQuery) use ($query) {
-                $contentQuery->search($query);
+            ->where(function (Builder $q) use ($query, $isSqlite) {
+                $q->where('title', 'like', '%' . $query . '%');
+                if (!$isSqlite) {
+                    $q->orWhereHas('pages.contentRecord', function (Builder $contentQuery) use ($query) {
+                        $contentQuery->search($query);
+                    });
+                } else {
+                    $q->orWhereHas('pages', function (Builder $pageQuery) use ($query) {
+                        $pageQuery->where('content', 'like', '%' . $query . '%');
+                    });
+                }
             })
-            ->with(['pages' => function ($pageQuery) use ($query) {
-                $pageQuery->completed()
-                    ->with(['content' => function ($contentQuery) use ($query) {
-                        $contentQuery->searchWithRelevance($query);
-                    }]);
+            ->with(['pages' => function ($pageQuery) {
+                $pageQuery->completed();
             }]);
 
         // Apply filters
         $this->applyFilters($searchQuery, $filters);
 
-        // Execute search with relevance scoring using the separated content table
-        $results = $searchQuery
-            ->select([
-                'pdf_documents.*',
-                DB::raw('(
-                    SELECT MAX(MATCH(pdf_page_content.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION))
-                    FROM pdf_page_content
-                    INNER JOIN pdf_document_pages ON pdf_page_content.page_id = pdf_document_pages.id
-                    WHERE pdf_document_pages.pdf_document_id = pdf_documents.id 
-                    AND pdf_document_pages.status = "completed"
-                ) as relevance_score')
-            ])
-            ->addBinding($query, 'select')
-            ->orderBy('relevance_score', 'desc')
-            ->paginate($perPage);
+        // Execute search with relevance scoring
+        if ($isSqlite) {
+            // SQLite doesn't support FULLTEXT, use simpler ordering
+            $results = $searchQuery->paginate($perPage);
+        } else {
+            // MySQL FULLTEXT search with relevance scoring
+            $results = $searchQuery
+                ->select([
+                    'pdf_documents.*',
+                    DB::raw('(
+                        SELECT MAX(MATCH(pdf_page_content.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION))
+                        FROM pdf_page_content
+                        INNER JOIN pdf_document_pages ON pdf_page_content.page_id = pdf_document_pages.id
+                        WHERE pdf_document_pages.pdf_document_id = pdf_documents.id
+                        AND pdf_document_pages.status = "completed"
+                    ) as relevance_score')
+                ])
+                ->addBinding($query, 'select')
+                ->orderBy('relevance_score', 'desc')
+                ->paginate($perPage);
+        }
 
         // Process results for better presentation
         $processedResults = $results->getCollection()->map(function ($document) use ($query) {
             $document->search_snippets = $this->generateDocumentSnippets($document, $query);
-            $document->relevance_score = round($document->relevance_score, 4);
+            $document->relevance_score = round($document->relevance_score ?? 1.0, 4);
             return $document;
         });
 
@@ -111,30 +125,44 @@ class SearchService implements SearchServiceInterface
             return $this->paginateFromCache($cached, $perPage);
         }
 
-        // Execute search within document pages using the separated content table
-        $results = PdfDocumentPage::query()
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+
+        // Execute search within document pages
+        $pageQuery = PdfDocumentPage::query()
             ->where('pdf_document_id', $document->id)
             ->completed()
-            ->whereHas('content', function (Builder $contentQuery) use ($query) {
-                $contentQuery->search($query);
-            })
-            ->join('pdf_page_content', 'pdf_document_pages.id', '=', 'pdf_page_content.page_id')
-            ->select([
-                'pdf_document_pages.*',
-                DB::raw('MATCH(pdf_page_content.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) as relevance_score')
-            ])
-            ->addBinding($query, 'select')
-            ->orderBy('relevance_score', 'desc')
-            ->orderBy('page_number', 'asc')
-            ->with(['document', 'content'])
-            ->paginate($perPage);
+            ->where('content', 'like', '%' . $query . '%')
+            ->with(['document']);
+
+        if ($isSqlite) {
+            // SQLite doesn't support FULLTEXT
+            $results = $pageQuery
+                ->orderBy('page_number', 'asc')
+                ->paginate($perPage);
+        } else {
+            // MySQL FULLTEXT search
+            $results = $pageQuery
+                ->whereHas('contentRecord', function (Builder $contentQuery) use ($query) {
+                    $contentQuery->search($query);
+                })
+                ->join('pdf_page_content', 'pdf_document_pages.id', '=', 'pdf_page_content.page_id')
+                ->select([
+                    'pdf_document_pages.*',
+                    DB::raw('MATCH(pdf_page_content.content) AGAINST(? IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION) as relevance_score')
+                ])
+                ->addBinding($query, 'select')
+                ->orderBy('relevance_score', 'desc')
+                ->orderBy('page_number', 'asc')
+                ->with(['contentRecord'])
+                ->paginate($perPage);
+        }
 
         // Process results with snippets
         $processedResults = $results->getCollection()->map(function ($page) use ($query) {
-            $contentText = $page->content ? $page->content->content : '';
+            $contentText = $page->contentRecord ? $page->contentRecord->content : ($page->content ?? '');
             $page->search_snippet = $this->generateSnippet($contentText, $query);
             $page->highlighted_content = $this->highlightContent($contentText, $query);
-            $page->relevance_score = round($page->relevance_score, 4);
+            $page->relevance_score = round($page->relevance_score ?? 1.0, 4);
             return $page;
         });
 
@@ -149,32 +177,59 @@ class SearchService implements SearchServiceInterface
     public function getSuggestions(string $query, int $limit = 10): array
     {
         $query = $this->sanitizeQuery($query);
-        
+
         if (strlen($query) < 2) {
             return [];
         }
 
-        // Get common terms from indexed content using the separated content table
-        $suggestions = DB::table('pdf_page_content')
-            ->join('pdf_document_pages', 'pdf_page_content.page_id', '=', 'pdf_document_pages.id')
-            ->select(DB::raw('pdf_page_content.content'))
-            ->where('pdf_document_pages.status', 'completed')
-            ->where('pdf_document_pages.is_parsed', true)
-            ->whereRaw('pdf_page_content.content LIKE ?', ['%' . $query . '%'])
-            ->limit(50)
-            ->get()
-            ->flatMap(function ($pageContent) use ($query) {
-                // Extract words around the query term
-                preg_match_all('/\b\w*' . preg_quote($query, '/') . '\w*\b/i', $pageContent->content, $matches);
-                return $matches[0];
-            })
-            ->unique()
-            ->filter(function ($suggestion) use ($query) {
-                return strlen($suggestion) > strlen($query) && strlen($suggestion) <= 50;
-            })
-            ->take($limit)
-            ->values()
-            ->toArray();
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+
+        // For SQLite, use the content column directly on pdf_document_pages
+        if ($isSqlite) {
+            $suggestions = DB::table('pdf_document_pages')
+                ->select('content')
+                ->where('status', 'completed')
+                ->where('is_parsed', true)
+                ->where('content', 'like', '%' . $query . '%')
+                ->limit(50)
+                ->get()
+                ->flatMap(function ($pageContent) use ($query) {
+                    if (empty($pageContent->content)) {
+                        return [];
+                    }
+                    preg_match_all('/\b\w*' . preg_quote($query, '/') . '\w*\b/i', $pageContent->content, $matches);
+                    return $matches[0] ?? [];
+                })
+                ->unique()
+                ->filter(function ($suggestion) use ($query) {
+                    return strlen($suggestion) > strlen($query) && strlen($suggestion) <= 50;
+                })
+                ->take($limit)
+                ->values()
+                ->toArray();
+        } else {
+            // Get common terms from indexed content using the separated content table
+            $suggestions = DB::table('pdf_page_content')
+                ->join('pdf_document_pages', 'pdf_page_content.page_id', '=', 'pdf_document_pages.id')
+                ->select(DB::raw('pdf_page_content.content'))
+                ->where('pdf_document_pages.status', 'completed')
+                ->where('pdf_document_pages.is_parsed', true)
+                ->whereRaw('pdf_page_content.content LIKE ?', ['%' . $query . '%'])
+                ->limit(50)
+                ->get()
+                ->flatMap(function ($pageContent) use ($query) {
+                    // Extract words around the query term
+                    preg_match_all('/\b\w*' . preg_quote($query, '/') . '\w*\b/i', $pageContent->content, $matches);
+                    return $matches[0];
+                })
+                ->unique()
+                ->filter(function ($suggestion) use ($query) {
+                    return strlen($suggestion) > strlen($query) && strlen($suggestion) <= 50;
+                })
+                ->take($limit)
+                ->values()
+                ->toArray();
+        }
 
         return array_slice($suggestions, 0, $limit);
     }
@@ -340,15 +395,35 @@ class SearchService implements SearchServiceInterface
 
     public function getSearchStats(): array
     {
+        $isSqlite = DB::connection()->getDriverName() === 'sqlite';
+
+        // Get content stats safely
+        $totalContentSize = 0;
+        $contentStats = [];
+
+        try {
+            if (!$isSqlite && \Schema::hasTable('pdf_page_content')) {
+                $totalContentSize = DB::table('pdf_page_content')
+                    ->selectRaw('SUM(content_length) as total_size')
+                    ->value('total_size') ?? 0;
+                $contentStats = PdfPageContent::getContentStats();
+            } else {
+                // For SQLite, calculate from the content column
+                $totalContentSize = DB::table('pdf_document_pages')
+                    ->selectRaw('SUM(LENGTH(content)) as total_size')
+                    ->value('total_size') ?? 0;
+            }
+        } catch (\Exception $e) {
+            // Ignore errors
+        }
+
         return [
             'total_documents' => PdfDocument::count(),
             'searchable_documents' => PdfDocument::searchable()->count(),
             'total_pages' => PdfDocumentPage::count(),
             'indexed_pages' => PdfDocumentPage::parsed()->count(),
-            'total_content_size' => DB::table('pdf_page_content')
-                ->selectRaw('SUM(content_length) as total_size')
-                ->value('total_size') ?? 0,
-            'content_stats' => PdfPageContent::getContentStats(),
+            'total_content_size' => $totalContentSize,
+            'content_stats' => $contentStats,
         ];
     }
 
@@ -390,7 +465,7 @@ class SearchService implements SearchServiceInterface
     protected function generateDocumentSnippets(PdfDocument $document, string $query): array
     {
         return $document->pages->take(3)->map(function ($page) use ($query) {
-            $contentText = $page->content ? $page->content->content : '';
+            $contentText = $page->contentRecord ? $page->contentRecord->content : '';
             return [
                 'page_number' => $page->page_number,
                 'snippet' => $this->generateSnippet($contentText, $query),

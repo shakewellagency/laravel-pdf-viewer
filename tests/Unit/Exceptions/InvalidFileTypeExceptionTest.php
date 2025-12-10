@@ -1,62 +1,46 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Exceptions;
-
 use Shakewellagency\LaravelPdfViewer\Exceptions\InvalidFileTypeException;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class InvalidFileTypeExceptionTest extends TestCase
-{
-    public function test_exception_has_default_values(): void
-    {
-        $exception = new InvalidFileTypeException();
+it('has default values', function () {
+    $exception = new InvalidFileTypeException();
 
-        $this->assertEquals("Invalid file type", $exception->getMessage());
-        $this->assertEquals(422, $exception->getCode());
-        $this->assertNull($exception->getPrevious());
-    }
+    expect($exception->getMessage())->toBe('Invalid file type');
+    expect($exception->getCode())->toBe(422);
+    expect($exception->getPrevious())->toBeNull();
+});
 
-    public function test_exception_with_custom_message(): void
-    {
-        $message = "Custom invalid file type message";
-        $exception = new InvalidFileTypeException($message);
+it('accepts custom message', function () {
+    $message = 'Custom invalid file type message';
+    $exception = new InvalidFileTypeException($message);
 
-        $this->assertEquals($message, $exception->getMessage());
-        $this->assertEquals(422, $exception->getCode());
-    }
+    expect($exception->getMessage())->toBe($message);
+    expect($exception->getCode())->toBe(422);
+});
 
-    public function test_exception_with_custom_code(): void
-    {
-        $code = 400;
-        $exception = new InvalidFileTypeException("Message", $code);
+it('accepts custom code', function () {
+    $code = 400;
+    $exception = new InvalidFileTypeException('Message', $code);
 
-        $this->assertEquals("Message", $exception->getMessage());
-        $this->assertEquals($code, $exception->getCode());
-    }
+    expect($exception->getMessage())->toBe('Message');
+    expect($exception->getCode())->toBe($code);
+});
 
-    public function test_exception_with_previous(): void
-    {
-        $previous = new \Exception("Previous exception");
-        $exception = new InvalidFileTypeException("Message", 422, $previous);
+it('accepts previous exception', function () {
+    $previous = new \Exception('Previous exception');
+    $exception = new InvalidFileTypeException('Message', 422, $previous);
 
-        $this->assertEquals("Message", $exception->getMessage());
-        $this->assertEquals(422, $exception->getCode());
-        $this->assertSame($previous, $exception->getPrevious());
-    }
+    expect($exception->getMessage())->toBe('Message');
+    expect($exception->getCode())->toBe(422);
+    expect($exception->getPrevious())->toBe($previous);
+});
 
-    public function test_exception_is_throwable(): void
-    {
-        $this->expectException(InvalidFileTypeException::class);
-        $this->expectExceptionMessage("Test exception");
-        $this->expectExceptionCode(422);
+it('is throwable', function () {
+    throw new InvalidFileTypeException('Test exception');
+})->throws(InvalidFileTypeException::class, 'Test exception');
 
-        throw new InvalidFileTypeException("Test exception");
-    }
+it('extends base exception', function () {
+    $exception = new InvalidFileTypeException();
 
-    public function test_exception_extends_base_exception(): void
-    {
-        $exception = new InvalidFileTypeException();
-
-        $this->assertInstanceOf(\Exception::class, $exception);
-    }
-}
+    expect($exception)->toBeInstanceOf(\Exception::class);
+});
