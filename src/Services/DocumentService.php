@@ -51,7 +51,7 @@ class DocumentService implements DocumentServiceInterface
             // Store metadata in normalized structure
             foreach ($metadata as $key => $value) {
                 if ($key !== 'title') { // title is already stored in main table
-                    $document->setMetadata($key, $value);
+                    $document->setMetadataByKey($key, $value);
                 }
             }
 
@@ -99,7 +99,7 @@ class DocumentService implements DocumentServiceInterface
             'status' => $document->status,
             'is_searchable' => $document->is_searchable,
             'processing_progress' => $document->getProcessingProgress(),
-            'metadata' => $document->getAllMetadata(),
+            'metadata' => $document->getAllMetadataRecords(),
             'created_at' => $document->created_at,
             'updated_at' => $document->updated_at,
         ];
@@ -183,7 +183,7 @@ class DocumentService implements DocumentServiceInterface
         // Update metadata in normalized structure
         if (isset($metadata['metadata'])) {
             foreach ($metadata['metadata'] as $key => $value) {
-                $document->setMetadata($key, $value);
+                $document->setMetadataByKey($key, $value);
             }
         }
 
@@ -445,7 +445,7 @@ class DocumentService implements DocumentServiceInterface
         // Store metadata in normalized structure
         foreach ($metadata as $key => $value) {
             if (!in_array($key, ['title', 'original_filename', 'file_size'])) {
-                $document->setMetadata($key, $value);
+                $document->setMetadataByKey($key, $value);
             }
         }
 
@@ -472,8 +472,8 @@ class DocumentService implements DocumentServiceInterface
             $uploadId = $result['UploadId'];
 
             // Store upload ID in document metadata
-            $document->setMetadata('multipart_upload_id', $uploadId);
-            $document->setMetadata('upload_initiated_at', now()->toISOString());
+            $document->setMetadataByKey('multipart_upload_id', $uploadId);
+            $document->setMetadataByKey('upload_initiated_at', now()->toISOString());
 
             Log::info('Multipart upload initiated', [
                 'document_hash' => $document->hash,
@@ -512,7 +512,7 @@ class DocumentService implements DocumentServiceInterface
             throw new \Exception('Document is not in pending upload state');
         }
 
-        $uploadId = $document->getMetadata('multipart_upload_id');
+        $uploadId = $document->getMetadataByKey('multipart_upload_id');
         if (!$uploadId) {
             throw new \Exception('No multipart upload ID found for document');
         }
@@ -578,7 +578,7 @@ class DocumentService implements DocumentServiceInterface
             throw new \Exception('Document is not in pending upload state');
         }
 
-        $uploadId = $document->getMetadata('multipart_upload_id');
+        $uploadId = $document->getMetadataByKey('multipart_upload_id');
         if (!$uploadId) {
             throw new \Exception('No multipart upload ID found for document');
         }
@@ -614,9 +614,9 @@ class DocumentService implements DocumentServiceInterface
             ]);
 
             // Store upload completion metadata
-            $document->setMetadata('upload_completed_at', now()->toISOString());
+            $document->setMetadataByKey('upload_completed_at', now()->toISOString());
             if (isset($result['ETag'])) {
-                $document->setMetadata('etag', $result['ETag']);
+                $document->setMetadataByKey('etag', $result['ETag']);
             }
 
             Log::info('Multipart upload completed successfully', [
@@ -646,7 +646,7 @@ class DocumentService implements DocumentServiceInterface
     {
         $document = $this->findByHashOrFail($documentHash);
         
-        $uploadId = $document->getMetadata('multipart_upload_id');
+        $uploadId = $document->getMetadataByKey('multipart_upload_id');
         if (!$uploadId) {
             return true; // Nothing to abort
         }

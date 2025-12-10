@@ -96,11 +96,15 @@ return [
             'document_metadata' => env('PDF_VIEWER_CACHE_DOCUMENT_TTL', 3600), // 1 hour
             'page_content' => env('PDF_VIEWER_CACHE_PAGE_TTL', 7200), // 2 hours
             'search_results' => env('PDF_VIEWER_CACHE_SEARCH_TTL', 1800), // 30 minutes
+            'outline' => env('PDF_VIEWER_CACHE_OUTLINE_TTL', 86400), // 24 hours (static data)
+            'links' => env('PDF_VIEWER_CACHE_LINKS_TTL', 86400), // 24 hours (static data)
         ],
         'tags' => [
             'documents' => 'pdf_viewer_documents',
             'pages' => 'pdf_viewer_pages',
             'search' => 'pdf_viewer_search',
+            'outline' => 'pdf_viewer_outline',
+            'links' => 'pdf_viewer_links',
         ],
     ],
 
@@ -116,6 +120,29 @@ return [
         'snippet_length' => env('PDF_VIEWER_SEARCH_SNIPPET_LENGTH', 200),
         'highlight_tag' => env('PDF_VIEWER_SEARCH_HIGHLIGHT_TAG', 'mark'),
         'mode' => env('PDF_VIEWER_SEARCH_MODE', 'IN NATURAL LANGUAGE MODE WITH QUERY EXPANSION'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Extraction Configuration (TOC & Links)
+    |--------------------------------------------------------------------------
+    |
+    | Configure automatic extraction of Table of Contents (TOC/Outline) and
+    | links during document processing.
+    |
+    */
+    'extraction' => [
+        // Enable/disable outline (TOC) extraction during processing
+        'outline_enabled' => env('PDF_VIEWER_OUTLINE_ENABLED', true),
+
+        // Enable/disable link extraction during processing
+        'links_enabled' => env('PDF_VIEWER_LINKS_ENABLED', true),
+
+        // Maximum pages to process for link extraction (0 = no limit)
+        'max_pages_for_links' => env('PDF_VIEWER_MAX_PAGES_FOR_LINKS', 0),
+
+        // Batch size for link insertion (performance optimization)
+        'link_batch_size' => env('PDF_VIEWER_LINK_BATCH_SIZE', 100),
     ],
 
     /*
@@ -221,7 +248,20 @@ return [
         'hash_algorithm' => env('PDF_VIEWER_HASH_ALGORITHM', 'sha256'),
         'salt' => env('PDF_VIEWER_SALT', env('APP_KEY')),
         'max_upload_attempts' => env('PDF_VIEWER_MAX_UPLOAD_ATTEMPTS', 5),
-        'rate_limit' => env('PDF_VIEWER_RATE_LIMIT', 60), // requests per minute
+
+        // Rate limiting settings (requests per minute)
+        'rate_limit_enabled' => env('PDF_VIEWER_RATE_LIMIT_ENABLED', true),
+        'rate_limit' => env('PDF_VIEWER_RATE_LIMIT', 60), // General API requests
+        'rate_limit_upload' => env('PDF_VIEWER_RATE_LIMIT_UPLOAD', 10), // Document uploads
+        'rate_limit_search' => env('PDF_VIEWER_RATE_LIMIT_SEARCH', 30), // Search requests
+        'rate_limit_download' => env('PDF_VIEWER_RATE_LIMIT_DOWNLOAD', 100), // Downloads
+
+        // Authorization policy (can be disabled for custom implementation)
+        'enable_policy' => env('PDF_VIEWER_ENABLE_POLICY', true),
+
+        // Input sanitization
+        'sanitize_filenames' => env('PDF_VIEWER_SANITIZE_FILENAMES', true),
+        'max_filename_length' => env('PDF_VIEWER_MAX_FILENAME_LENGTH', 200),
     ],
 
     /*

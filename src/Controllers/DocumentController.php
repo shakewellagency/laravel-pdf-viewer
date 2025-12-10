@@ -12,6 +12,10 @@ use Shakewellagency\LaravelPdfViewer\Requests\DocumentIndexRequest;
 use Shakewellagency\LaravelPdfViewer\Requests\DocumentUpdateRequest;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentResource;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentProgressResource;
+use Shakewellagency\LaravelPdfViewer\Resources\OutlineResource;
+use Shakewellagency\LaravelPdfViewer\Resources\LinkResource;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentOutline;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentLink;
 use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 use Shakewellagency\LaravelPdfViewer\Services\MonitoringService;
 use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
@@ -696,6 +700,137 @@ class DocumentController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'message' => 'Failed to retrieve detailed progress',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get document outline (table of contents)
+     */
+    public function outline(string $documentHash): JsonResponse
+    {
+        $document = $this->documentService->findByHash($documentHash);
+
+        if (!$document) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        try {
+            // Try to get cached outline first
+            $cachedOutline = $this->cacheService->getCachedOutline($documentHash);
+
+            if ($cachedOutline !== null) {
+                return response()->json($cachedOutline);
+            }
+
+            // Get outline entries with eager-loaded descendants (single query with recursion)
+            $outlineEntries = PdfDocumentOutline::where('pdf_document_id', $document->id)
+                ->whereNull('parent_id')
+                ->with('descendants')
+                ->orderBy('order_index')
+                ->get();
+
+            // Get counts efficiently with single queries
+            $totalEntries = PdfDocumentOutline::where('pdf_document_id', $document->id)->count();
+            $maxDepth = PdfDocumentOutline::where('pdf_document_id', $document->id)->max('level') ?? 0;
+            $hasOutline = $totalEntries > 0;
+
+            $response = [
+                'data' => OutlineResource::collection($outlineEntries),
+                'meta' => [
+                    'document_hash' => $document->hash,
+                    'has_outline' => $hasOutline,
+                    'total_entries' => $totalEntries,
+                    'max_depth' => $maxDepth,
+                ],
+            ];
+
+            // Cache the response (24 hour TTL - outline data is static)
+            $this->cacheService->cacheOutline($documentHash, $response);
+
+            return response()->json($response);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve document outline',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get document links with statistics
+     */
+    public function links(string $documentHash): JsonResponse
+    {
+        $document = $this->documentService->findByHash($documentHash);
+
+        if (!$document) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        try {
+            // Try to get cached links first
+            $cachedLinks = $this->cacheService->getCachedLinks($documentHash);
+
+            if ($cachedLinks !== null) {
+                return response()->json($cachedLinks);
+            }
+
+            // Get link statistics efficiently with optimized queries
+            // Use selectRaw for aggregates in a single query
+            $stats = PdfDocumentLink::where('pdf_document_id', $document->id)
+                ->selectRaw('COUNT(*) as total')
+                ->selectRaw("SUM(CASE WHEN type = 'internal' THEN 1 ELSE 0 END) as internal")
+                ->selectRaw("SUM(CASE WHEN type = 'external' THEN 1 ELSE 0 END) as external")
+                ->first();
+
+            $totalLinks = (int) $stats->total;
+            $internalLinks = (int) $stats->internal;
+            $externalLinks = (int) $stats->external;
+
+            // Get all links with single query for grouping
+            $allLinks = PdfDocumentLink::where('pdf_document_id', $document->id)
+                ->orderBy('source_page')
+                ->orderBy('id')
+                ->get();
+
+            // Group links by source page
+            $linksByPage = $allLinks->groupBy('source_page')->map(function ($pageLinks, $pageNumber) {
+                return [
+                    'page_number' => $pageNumber,
+                    'total' => $pageLinks->count(),
+                    'internal' => $pageLinks->where('type', 'internal')->count(),
+                    'external' => $pageLinks->where('type', 'external')->count(),
+                    'links' => LinkResource::collection($pageLinks),
+                ];
+            })->values();
+
+            $response = [
+                'data' => [
+                    'summary' => [
+                        'total_links' => $totalLinks,
+                        'internal_links' => $internalLinks,
+                        'external_links' => $externalLinks,
+                        'pages_with_links' => $linksByPage->count(),
+                    ],
+                    'links_by_page' => $linksByPage,
+                ],
+                'meta' => [
+                    'document_hash' => $document->hash,
+                    'has_links' => $totalLinks > 0,
+                ],
+            ];
+
+            // Cache the response (24 hour TTL - link data is static)
+            $this->cacheService->cacheLinks($documentHash, $response);
+
+            return response()->json($response);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Failed to retrieve document links',
                 'error' => $e->getMessage(),
             ], 500);
         }

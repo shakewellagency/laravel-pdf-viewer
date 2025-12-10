@@ -1,0 +1,647 @@
+openapi: 3.1.0
+info:
+  title: Laravel PDF Viewer API
+  description: |
+    API for viewing and navigating PDF documents with support for Table of Contents (TOC),
+    internal/external hyperlinks, page extraction, and full-text search.
+
+    ## Authentication
+    All endpoints require authentication via Laravel Sanctum. Include the Bearer token
+    in the Authorization header:
+    ```
+    Authorization: Bearer <your-token>
+    ```
+
+    ## Feature Toggles
+    TOC and Link extraction can be disabled via environment variables:
+    - `PDF_VIEWER_OUTLINE_ENABLED=false` - Disables TOC/outline extraction
+    - `PDF_VIEWER_LINKS_ENABLED=false` - Disables link extraction
+
+    When disabled, the respective endpoints will return empty arrays.
+  version: 1.0.0
+  contact:
+    name: Shakewell Agency
+    url: https://shakewell.agency
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: '{protocol}://{host}/api/pdf-viewer'
+    description: PDF Viewer API
+    variables:
+      protocol:
+        default: https
+        enum: [http, https]
+      host:
+        default: api.example.com
+
+tags:
+  - name: Documents
+    description: Document management and metadata
+  - name: Outline
+    description: Table of Contents / Outline navigation
+  - name: Links
+    description: Internal and external hyperlinks
+  - name: Pages
+    description: Individual page operations
+  - name: Search
+    description: Full-text search functionality
+
+paths:
+  /documents/{document_hash}/outline:
+    get:
+      tags:
+        - Outline
+      summary: Get document outline (Table of Contents)
+      description: |
+        Retrieves the hierarchical Table of Contents (outline/bookmarks) for a PDF document.
+
+        The outline is returned as a tree structure where each entry can have children.
+        This enables navigation within the document via bookmarks.
+
+        **Note:** Returns an empty array if the PDF has no outline or if outline extraction is disabled.
+      operationId: getDocumentOutline
+      parameters:
+        - $ref: '#/components/parameters/DocumentHash'
+      responses:
+        '200':
+          description: Successful response with outline tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutlineResponse'
+              examples:
+                withOutline:
+                  summary: Document with multi-level TOC
+                  value:
+                    data:
+                      - id: "550e8400-e29b-41d4-a716-446655440001"
+                        title: "Chapter 1: Introduction"
+                        level: 0
+                        destination_page: 1
+                        destination_type: "page"
+                        destination_name: null
+                        children:
+                          - id: "550e8400-e29b-41d4-a716-446655440002"
+                            title: "1.1 Overview"
+                            level: 1
+                            destination_page: 3
+                            destination_type: "page"
+                            destination_name: null
+                            children: []
+                          - id: "550e8400-e29b-41d4-a716-446655440003"
+                            title: "1.2 Getting Started"
+                            level: 1
+                            destination_page: 5
+                            destination_type: "page"
+                            destination_name: null
+                            children: []
+                      - id: "550e8400-e29b-41d4-a716-446655440004"
+                        title: "Chapter 2: Installation"
+                        level: 0
+                        destination_page: 10
+                        destination_type: "page"
+                        destination_name: null
+                        children: []
+                noOutline:
+                  summary: Document without TOC
+                  value:
+                    data: []
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/DocumentNotFound'
+
+  /documents/{document_hash}/links:
+    get:
+      tags:
+        - Links
+      summary: Get document link statistics
+      description: |
+        Retrieves link statistics for a PDF document, including total count and
+        breakdown by page number.
+
+        Use this endpoint to get an overview of links in the document before
+        fetching per-page link details.
+
+        **Note:** Returns zeros if the PDF has no links or if link extraction is disabled.
+      operationId: getDocumentLinks
+      parameters:
+        - $ref: '#/components/parameters/DocumentHash'
+      responses:
+        '200':
+          description: Successful response with link statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkStatisticsResponse'
+              examples:
+                withLinks:
+                  summary: Document with links
+                  value:
+                    data:
+                      total_links: 45
+                      internal_links: 30
+                      external_links: 15
+                      pages_with_links: 12
+                      links_by_page:
+                        1: 5
+                        3: 8
+                        5: 3
+                        10: 12
+                        15: 7
+                        20: 10
+                noLinks:
+                  summary: Document without links
+                  value:
+                    data:
+                      total_links: 0
+                      internal_links: 0
+                      external_links: 0
+                      pages_with_links: 0
+                      links_by_page: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/DocumentNotFound'
+
+  /documents/{document_hash}/pages/{page_number}/links:
+    get:
+      tags:
+        - Links
+        - Pages
+      summary: Get links for a specific page
+      description: |
+        Retrieves all links (internal and external) for a specific page of a PDF document.
+
+        Each link includes:
+        - **Absolute coordinates** (in PDF points) for exact positioning
+        - **Normalized coordinates** (as percentages) for responsive display
+        - **Link type** (internal or external)
+        - **Destination** (page number for internal, URL for external)
+
+        ## Coordinate Systems
+
+        ### Absolute Coordinates (PDF Points)
+        - Origin: Top-left corner of the page
+        - Units: PDF points (1/72 inch)
+        - Use for: Fixed-size rendering, PDF.js viewport matching
+
+        ### Normalized Coordinates (Percentages)
+        - Origin: Top-left corner of the page
+        - Units: Percentage of page dimensions (0-100)
+        - Use for: Responsive layouts, dynamic scaling
+
+        ## Usage Example (JavaScript)
+        ```javascript
+        // Fetch links for page 5
+        const response = await fetch('/api/pdf-viewer/documents/{hash}/pages/5/links');
+        const { data } = await response.json();
+
+        // Render link overlays
+        data.forEach(link => {
+          const overlay = document.createElement('div');
+          overlay.style.position = 'absolute';
+          overlay.style.left = `${link.normalized_coordinates.x_percent}%`;
+          overlay.style.top = `${link.normalized_coordinates.y_percent}%`;
+          overlay.style.width = `${link.normalized_coordinates.width_percent}%`;
+          overlay.style.height = `${link.normalized_coordinates.height_percent}%`;
+
+          overlay.onclick = () => {
+            if (link.type === 'internal') {
+              goToPage(link.destination_page);
+            } else {
+              window.open(link.destination_url, '_blank');
+            }
+          };
+
+          pageContainer.appendChild(overlay);
+        });
+        ```
+      operationId: getPageLinks
+      parameters:
+        - $ref: '#/components/parameters/DocumentHash'
+        - $ref: '#/components/parameters/PageNumber'
+      responses:
+        '200':
+          description: Successful response with page links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageLinksResponse'
+              examples:
+                mixedLinks:
+                  summary: Page with internal and external links
+                  value:
+                    data:
+                      - id: "660e8400-e29b-41d4-a716-446655440001"
+                        type: "internal"
+                        source_page: 1
+                        destination_page: 25
+                        destination_url: null
+                        link_text: "See Chapter 3"
+                        absolute_coordinates:
+                          x: 72.0
+                          y: 150.5
+                          width: 120.0
+                          height: 14.0
+                        normalized_coordinates:
+                          x_percent: 10.0
+                          y_percent: 18.5
+                          width_percent: 16.67
+                          height_percent: 1.72
+                      - id: "660e8400-e29b-41d4-a716-446655440002"
+                        type: "external"
+                        source_page: 1
+                        destination_page: null
+                        destination_url: "https://example.com/resources"
+                        link_text: "External Resource"
+                        absolute_coordinates:
+                          x: 72.0
+                          y: 200.0
+                          width: 150.0
+                          height: 14.0
+                        normalized_coordinates:
+                          x_percent: 10.0
+                          y_percent: 24.6
+                          width_percent: 20.83
+                          height_percent: 1.72
+                noLinks:
+                  summary: Page without links
+                  value:
+                    data: []
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/DocumentNotFound'
+
+  /documents/{document_hash}:
+    get:
+      tags:
+        - Documents
+      summary: Get document metadata
+      description: |
+        Retrieves metadata for a PDF document including processing status,
+        page count, and feature availability.
+      operationId: getDocument
+      parameters:
+        - $ref: '#/components/parameters/DocumentHash'
+      responses:
+        '200':
+          description: Successful response with document metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/DocumentNotFound'
+
+  /documents/{document_hash}/pages/{page_number}:
+    get:
+      tags:
+        - Pages
+      summary: Get page content/PDF
+      description: |
+        Retrieves the extracted single-page PDF for a specific page.
+        Returns a presigned S3 URL or streams the PDF directly.
+      operationId: getPage
+      parameters:
+        - $ref: '#/components/parameters/DocumentHash'
+        - $ref: '#/components/parameters/PageNumber'
+      responses:
+        '200':
+          description: Page PDF content or redirect
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    description: Presigned URL to download the page PDF
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/DocumentNotFound'
+
+components:
+  parameters:
+    DocumentHash:
+      name: document_hash
+      in: path
+      required: true
+      description: Unique hash identifier for the document
+      schema:
+        type: string
+        pattern: '^[a-f0-9]{64}$'
+        example: "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd"
+
+    PageNumber:
+      name: page_number
+      in: path
+      required: true
+      description: Page number (1-indexed)
+      schema:
+        type: integer
+        minimum: 1
+        example: 1
+
+  schemas:
+    OutlineEntry:
+      type: object
+      required:
+        - id
+        - title
+        - level
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the outline entry
+        title:
+          type: string
+          maxLength: 500
+          description: Display title for the outline entry
+          example: "Chapter 1: Introduction"
+        level:
+          type: integer
+          minimum: 0
+          description: Nesting level (0 = top level)
+          example: 0
+        destination_page:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Target page number for navigation
+          example: 1
+        destination_type:
+          type: string
+          enum: [page, named]
+          description: Type of destination
+          example: "page"
+        destination_name:
+          type: string
+          nullable: true
+          description: Named destination identifier (for named destinations)
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutlineEntry'
+          description: Child entries (for nested structure)
+
+    OutlineResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutlineEntry'
+          description: Array of top-level outline entries
+
+    LinkStatistics:
+      type: object
+      properties:
+        total_links:
+          type: integer
+          minimum: 0
+          description: Total number of links in the document
+          example: 45
+        internal_links:
+          type: integer
+          minimum: 0
+          description: Number of internal (within-document) links
+          example: 30
+        external_links:
+          type: integer
+          minimum: 0
+          description: Number of external (URL) links
+          example: 15
+        pages_with_links:
+          type: integer
+          minimum: 0
+          description: Number of pages containing at least one link
+          example: 12
+        links_by_page:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Map of page number to link count
+          example:
+            1: 5
+            3: 8
+            10: 12
+
+    LinkStatisticsResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/LinkStatistics'
+
+    AbsoluteCoordinates:
+      type: object
+      description: Coordinates in PDF points (1/72 inch)
+      properties:
+        x:
+          type: number
+          format: float
+          description: X position from left edge
+          example: 72.0
+        y:
+          type: number
+          format: float
+          description: Y position from top edge
+          example: 150.5
+        width:
+          type: number
+          format: float
+          description: Width of the link area
+          example: 120.0
+        height:
+          type: number
+          format: float
+          description: Height of the link area
+          example: 14.0
+
+    NormalizedCoordinates:
+      type: object
+      description: Coordinates as percentages of page dimensions
+      properties:
+        x_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: X position as percentage of page width
+          example: 10.0
+        y_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Y position as percentage of page height
+          example: 18.5
+        width_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Width as percentage of page width
+          example: 16.67
+        height_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Height as percentage of page height
+          example: 1.72
+
+    PageLink:
+      type: object
+      required:
+        - id
+        - type
+        - source_page
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier for the link
+        type:
+          type: string
+          enum: [internal, external, unknown]
+          description: Type of link
+          example: "internal"
+        source_page:
+          type: integer
+          minimum: 1
+          description: Page number where the link appears
+          example: 1
+        destination_page:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Target page number (for internal links)
+          example: 25
+        destination_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          nullable: true
+          description: Target URL (for external links)
+          example: "https://example.com/resources"
+        link_text:
+          type: string
+          maxLength: 1000
+          nullable: true
+          description: Text content of the link (if extractable)
+          example: "See Chapter 3"
+        absolute_coordinates:
+          $ref: '#/components/schemas/AbsoluteCoordinates'
+        normalized_coordinates:
+          $ref: '#/components/schemas/NormalizedCoordinates'
+
+    PageLinksResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PageLink'
+          description: Array of links on the page
+
+    Document:
+      type: object
+      properties:
+        hash:
+          type: string
+          description: Unique document hash
+        title:
+          type: string
+          description: Document title
+        filename:
+          type: string
+          description: Original filename
+        page_count:
+          type: integer
+          description: Total number of pages
+        status:
+          type: string
+          enum: [pending_upload, uploaded, processing, completed, failed]
+          description: Processing status
+        has_outline:
+          type: boolean
+          description: Whether document has a Table of Contents
+        has_links:
+          type: boolean
+          description: Whether document has extractable links
+        outline_count:
+          type: integer
+          description: Number of outline entries
+        link_count:
+          type: integer
+          description: Number of links
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DocumentResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Document'
+
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Error message
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Validation errors by field
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: "Unauthenticated."
+
+    DocumentNotFound:
+      description: Document not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: "Document not found."
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Laravel Sanctum Bearer Token
+
+security:
+  - bearerAuth: []

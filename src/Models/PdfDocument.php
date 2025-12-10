@@ -24,7 +24,9 @@ class PdfDocument extends Model
         'file_path',
         'page_count',
         'status',
+        'metadata',
         'processing_error',
+        'processing_progress',
         'processing_started_at',
         'processing_completed_at',
         'is_searchable',
@@ -34,6 +36,8 @@ class PdfDocument extends Model
     protected $casts = [
         'processing_started_at' => 'datetime',
         'processing_completed_at' => 'datetime',
+        'metadata' => 'array',
+        'processing_progress' => 'array',
         'is_searchable' => 'boolean',
         'file_size' => 'integer',
         'page_count' => 'integer',
@@ -242,9 +246,10 @@ class PdfDocument extends Model
     }
 
     /**
-     * Get document metadata
+     * Get document metadata records (stored in separate table)
+     * Note: Named 'metadataRecords' to avoid conflict with 'metadata' column
      */
-    public function metadata(): HasMany
+    public function metadataRecords(): HasMany
     {
         return $this->hasMany(PdfDocumentMetadata::class);
     }
@@ -266,36 +271,76 @@ class PdfDocument extends Model
     }
 
     /**
-     * Get a specific metadata value by key
+     * Get document outline/TOC entries
      */
-    public function getMetadata(string $key, $default = null)
+    public function outlines(): HasMany
     {
-        $metadata = $this->metadata()->where('key', $key)->first();
+        return $this->hasMany(PdfDocumentOutline::class)->orderBy('sort_order');
+    }
+
+    /**
+     * Get root outline entries (top-level TOC items)
+     */
+    public function rootOutlines(): HasMany
+    {
+        return $this->outlines()->whereNull('parent_id');
+    }
+
+    /**
+     * Get document links
+     */
+    public function links(): HasMany
+    {
+        return $this->hasMany(PdfDocumentLink::class);
+    }
+
+    /**
+     * Get internal links only
+     */
+    public function internalLinks(): HasMany
+    {
+        return $this->links()->where('type', PdfDocumentLink::TYPE_INTERNAL);
+    }
+
+    /**
+     * Get external links only
+     */
+    public function externalLinks(): HasMany
+    {
+        return $this->links()->where('type', PdfDocumentLink::TYPE_EXTERNAL);
+    }
+
+    /**
+     * Get a specific metadata value by key from the metadata records table
+     */
+    public function getMetadataByKey(string $key, $default = null)
+    {
+        $metadata = $this->metadataRecords()->where('key', $key)->first();
         return $metadata ? $metadata->typed_value : $default;
     }
 
     /**
-     * Set a metadata value by key
+     * Set a metadata value by key in the metadata records table
      */
-    public function setMetadata(string $key, $value): PdfDocumentMetadata
+    public function setMetadataByKey(string $key, $value): PdfDocumentMetadata
     {
-        $metadata = $this->metadata()->updateOrCreate(
+        $metadata = $this->metadataRecords()->updateOrCreate(
             ['key' => $key],
             []
         );
-        
+
         $metadata->setTypedValue($value);
         $metadata->save();
-        
+
         return $metadata;
     }
 
     /**
-     * Get all metadata as associative array
+     * Get all metadata records as associative array
      */
-    public function getAllMetadata(): array
+    public function getAllMetadataRecords(): array
     {
-        return $this->metadata->pluck('typed_value', 'key')->toArray();
+        return $this->metadataRecords->pluck('typed_value', 'key')->toArray();
     }
 
     /**

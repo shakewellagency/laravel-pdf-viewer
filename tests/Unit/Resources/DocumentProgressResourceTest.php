@@ -1,288 +1,301 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Resources;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
 use Shakewellagency\LaravelPdfViewer\Resources\DocumentProgressResource;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class DocumentProgressResourceTest extends TestCase
-{
-    use RefreshDatabase;
+it('transforms document progress to array', function () {
+    $document = PdfDocument::factory()->create([
+        'title' => 'Progress Test Document',
+        'status' => 'processing',
+        'page_count' => 10,
+        'is_searchable' => true,
+        'processing_progress' => 45.5,
+        'processing_started_at' => now()->subHours(2),
+    ]);
 
-    public function test_transforms_document_progress_to_array(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'title' => 'Progress Test Document',
-            'status' => 'processing',
-            'page_count' => 10,
-            'is_searchable' => true,
-            'processing_progress' => 45.5,
-            'processing_started_at' => now()->subHours(2),
-        ]);
+    // Create some completed and failed pages with unique page numbers
+    PdfDocumentPage::factory()->count(4)->sequence(
+        ['page_number' => 1],
+        ['page_number' => 2],
+        ['page_number' => 3],
+        ['page_number' => 4]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'completed',
+    ]);
 
-        // Create some completed and failed pages
-        PdfDocumentPage::factory()->count(4)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'completed',
-        ]);
+    PdfDocumentPage::factory()->count(1)->sequence(
+        ['page_number' => 5]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'failed',
+    ]);
 
-        PdfDocumentPage::factory()->count(1)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'failed',
-        ]);
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertEquals($document->hash, $result['hash']);
-        $this->assertEquals('Progress Test Document', $result['title']);
-        $this->assertEquals('processing', $result['status']);
-        $this->assertEquals(10, $result['total_pages']);
-        $this->assertEquals(4, $result['completed_pages']);
-        $this->assertEquals(1, $result['failed_pages']);
-        $this->assertTrue($result['is_searchable']);
-        $this->assertEquals(45.5, $result['processing_progress']);
-    }
+    expect($result['hash'])->toBe($document->hash);
+    expect($result['title'])->toBe('Progress Test Document');
+    expect($result['status'])->toBe('processing');
+    expect($result['total_pages'])->toBe(10);
+    expect($result['completed_pages'])->toBe(4);
+    expect($result['failed_pages'])->toBe(1);
+    expect($result['is_searchable'])->toBeTrue();
+    expect($result['processing_progress'])->toBe(45.5);
+});
 
-    public function test_includes_processing_error_when_failed(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'failed',
-            'processing_error' => 'Failed to process document',
-        ]);
+it('includes processing error when failed', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'failed',
+        'processing_error' => 'Failed to process document',
+    ]);
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $this->assertArrayHasKey('processing_error', $result);
-        $this->assertEquals('Failed to process document', $result['processing_error']);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_excludes_processing_error_when_not_failed(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'processing',
-        ]);
+    expect($result)->toHaveKey('processing_error');
+    expect($result['processing_error'])->toBe('Failed to process document');
+});
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('excludes processing error when not failed', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'processing',
+    ]);
 
-        $this->assertArrayNotHasKey('processing_error', $result);
-    }
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-    public function test_includes_estimated_completion_when_processing(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'processing',
-            'page_count' => 10,
-            'processing_started_at' => now()->subMinutes(30),
-        ]);
+    $result = $resource->toArray($request);
 
-        // Create some completed pages to enable estimation
-        PdfDocumentPage::factory()->count(3)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'completed',
-        ]);
+    expect($result)->not->toHaveKey('processing_error');
+});
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('includes estimated completion when processing', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'processing',
+        'page_count' => 10,
+        'processing_started_at' => now()->subMinutes(30),
+    ]);
 
-        $this->assertArrayHasKey('estimated_completion', $result);
-        $this->assertIsString($result['estimated_completion']);
-    }
+    // Create some completed pages to enable estimation
+    PdfDocumentPage::factory()->count(3)->sequence(
+        ['page_number' => 1],
+        ['page_number' => 2],
+        ['page_number' => 3]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'completed',
+    ]);
 
-    public function test_excludes_estimated_completion_when_not_processing(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'completed',
-        ]);
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertArrayNotHasKey('estimated_completion', $result);
-    }
+    expect($result)->toHaveKey('estimated_completion');
+    expect($result['estimated_completion'])->toBeString();
+});
 
-    public function test_estimated_completion_returns_null_with_no_completed_pages(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'processing',
-            'page_count' => 10,
-            'processing_started_at' => now()->subMinutes(30),
-        ]);
+it('excludes estimated completion when not processing', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'completed',
+    ]);
 
-        // No completed pages
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $this->assertArrayNotHasKey('estimated_completion', $result);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_estimated_completion_returns_null_with_no_processing_start_time(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'processing',
-            'page_count' => 10,
-            'processing_started_at' => null,
-        ]);
+    expect($result)->not->toHaveKey('estimated_completion');
+});
 
-        PdfDocumentPage::factory()->count(3)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'completed',
-        ]);
+it('estimated completion returns null with no completed pages', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'processing',
+        'page_count' => 10,
+        'processing_started_at' => now()->subMinutes(30),
+    ]);
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    // No completed pages
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $this->assertArrayNotHasKey('estimated_completion', $result);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_estimated_completion_returns_null_with_zero_page_count(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'processing',
-            'page_count' => 0,
-            'processing_started_at' => now()->subMinutes(30),
-        ]);
+    expect($result)->not->toHaveKey('estimated_completion');
+});
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('estimated completion returns null with no processing start time', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'processing',
+        'page_count' => 10,
+        'processing_started_at' => null,
+    ]);
 
-        $this->assertArrayNotHasKey('estimated_completion', $result);
-    }
+    PdfDocumentPage::factory()->count(3)->sequence(
+        ['page_number' => 1],
+        ['page_number' => 2],
+        ['page_number' => 3]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'completed',
+    ]);
 
-    public function test_formats_timestamps_properly(): void
-    {
-        $startTime = now()->subHours(3);
-        $endTime = now()->subHour();
-        
-        $document = PdfDocument::factory()->create([
-            'processing_started_at' => $startTime,
-            'processing_completed_at' => $endTime,
-        ]);
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $result = $resource->toArray($request);
 
-        $this->assertStringStartsWith($startTime->format('Y-m-d\TH:i:s'), $result['processing_started_at']);
-        $this->assertStringStartsWith($endTime->format('Y-m-d\TH:i:s'), $result['processing_completed_at']);
-    }
+    expect($result)->not->toHaveKey('estimated_completion');
+});
 
-    public function test_handles_null_timestamps(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'processing_started_at' => null,
-            'processing_completed_at' => null,
-        ]);
+it('estimated completion returns null with zero page count', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'processing',
+        'page_count' => 0,
+        'processing_started_at' => now()->subMinutes(30),
+    ]);
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-        $this->assertNull($result['processing_started_at']);
-        $this->assertNull($result['processing_completed_at']);
-    }
+    $result = $resource->toArray($request);
 
-    public function test_includes_progress_percentage(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'page_count' => 10,
-        ]);
+    expect($result)->not->toHaveKey('estimated_completion');
+});
 
-        // Create 7 completed pages for 70% progress
-        PdfDocumentPage::factory()->count(7)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'completed',
-        ]);
+it('formats timestamps properly', function () {
+    $startTime = now()->subHours(3);
+    $endTime = now()->subHour();
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    $document = PdfDocument::factory()->create([
+        'processing_started_at' => $startTime,
+        'processing_completed_at' => $endTime,
+    ]);
 
-        $this->assertArrayHasKey('progress_percentage', $result);
-        $this->assertEquals($document->getProcessingProgress(), $result['progress_percentage']);
-    }
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-    public function test_handles_complete_document(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'completed',
-            'page_count' => 5,
-            'processing_started_at' => now()->subHours(2),
-            'processing_completed_at' => now()->subHour(),
-        ]);
+    $result = $resource->toArray($request);
 
-        PdfDocumentPage::factory()->count(5)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'completed',
-        ]);
+    expect($result['processing_started_at'])->toStartWith($startTime->format('Y-m-d\TH:i:s'));
+    expect($result['processing_completed_at'])->toStartWith($endTime->format('Y-m-d\TH:i:s'));
+});
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+it('handles null timestamps', function () {
+    $document = PdfDocument::factory()->create([
+        'processing_started_at' => null,
+        'processing_completed_at' => null,
+    ]);
 
-        $this->assertEquals('completed', $result['status']);
-        $this->assertEquals(5, $result['total_pages']);
-        $this->assertEquals(5, $result['completed_pages']);
-        $this->assertEquals(0, $result['failed_pages']);
-        $this->assertArrayNotHasKey('estimated_completion', $result);
-        $this->assertArrayNotHasKey('processing_error', $result);
-    }
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
 
-    public function test_handles_failed_document_with_partial_processing(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'status' => 'failed',
-            'page_count' => 10,
-            'processing_error' => 'Processing timeout',
-            'processing_started_at' => now()->subHours(3),
-        ]);
+    $result = $resource->toArray($request);
 
-        PdfDocumentPage::factory()->count(3)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'completed',
-        ]);
+    expect($result['processing_started_at'])->toBeNull();
+    expect($result['processing_completed_at'])->toBeNull();
+});
 
-        PdfDocumentPage::factory()->count(2)->create([
-            'pdf_document_id' => $document->id,
-            'status' => 'failed',
-        ]);
+it('includes progress percentage', function () {
+    $document = PdfDocument::factory()->create([
+        'page_count' => 10,
+    ]);
 
-        $resource = new DocumentProgressResource($document);
-        $request = new Request();
-        
-        $result = $resource->toArray($request);
+    // Create 7 completed pages for 70% progress
+    PdfDocumentPage::factory()->count(7)->sequence(
+        ['page_number' => 1],
+        ['page_number' => 2],
+        ['page_number' => 3],
+        ['page_number' => 4],
+        ['page_number' => 5],
+        ['page_number' => 6],
+        ['page_number' => 7]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'completed',
+    ]);
 
-        $this->assertEquals('failed', $result['status']);
-        $this->assertEquals(10, $result['total_pages']);
-        $this->assertEquals(3, $result['completed_pages']);
-        $this->assertEquals(2, $result['failed_pages']);
-        $this->assertEquals('Processing timeout', $result['processing_error']);
-        $this->assertArrayNotHasKey('estimated_completion', $result);
-    }
-}
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result)->toHaveKey('progress_percentage');
+    expect($result['progress_percentage'])->toBe($document->getProcessingProgress());
+});
+
+it('handles complete document', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'completed',
+        'page_count' => 5,
+        'processing_started_at' => now()->subHours(2),
+        'processing_completed_at' => now()->subHour(),
+    ]);
+
+    // Use sequence to ensure unique page numbers for the unique constraint
+    PdfDocumentPage::factory()->count(5)->sequence(
+        ['page_number' => 1, 'status' => 'completed'],
+        ['page_number' => 2, 'status' => 'completed'],
+        ['page_number' => 3, 'status' => 'completed'],
+        ['page_number' => 4, 'status' => 'completed'],
+        ['page_number' => 5, 'status' => 'completed']
+    )->create(['pdf_document_id' => $document->id]);
+
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result['status'])->toBe('completed');
+    expect($result['total_pages'])->toBe(5);
+    expect($result['completed_pages'])->toBe(5);
+    expect($result['failed_pages'])->toBe(0);
+    expect($result)->not->toHaveKey('estimated_completion');
+    expect($result)->not->toHaveKey('processing_error');
+});
+
+it('handles failed document with partial processing', function () {
+    $document = PdfDocument::factory()->create([
+        'status' => 'failed',
+        'page_count' => 10,
+        'processing_error' => 'Processing timeout',
+        'processing_started_at' => now()->subHours(3),
+    ]);
+
+    // Use sequence to ensure unique page numbers
+    PdfDocumentPage::factory()->count(3)->sequence(
+        ['page_number' => 1],
+        ['page_number' => 2],
+        ['page_number' => 3]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'completed',
+    ]);
+
+    PdfDocumentPage::factory()->count(2)->sequence(
+        ['page_number' => 4],
+        ['page_number' => 5]
+    )->create([
+        'pdf_document_id' => $document->id,
+        'status' => 'failed',
+    ]);
+
+    $resource = new DocumentProgressResource($document);
+    $request = new Request();
+
+    $result = $resource->toArray($request);
+
+    expect($result['status'])->toBe('failed');
+    expect($result['total_pages'])->toBe(10);
+    expect($result['completed_pages'])->toBe(3);
+    expect($result['failed_pages'])->toBe(2);
+    expect($result['processing_error'])->toBe('Processing timeout');
+    expect($result)->not->toHaveKey('estimated_completion');
+});

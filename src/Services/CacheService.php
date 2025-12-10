@@ -219,6 +219,209 @@ class CacheService implements CacheServiceInterface
         }
     }
 
+    public function cacheOutline(string $documentHash, array $outline, ?int $ttl = null): bool
+    {
+        if (!config('pdf-viewer.cache.enabled', true)) {
+            return false;
+        }
+
+        try {
+            $key = $this->generateCacheKey('outline', ['hash' => $documentHash]);
+            $ttl = $ttl ?? config('pdf-viewer.cache.ttl.outline', 86400);
+            $outlineTag = $this->tags['outline'] ?? 'pdf_viewer_outline';
+
+            if ($this->supportsTags()) {
+                Cache::store($this->cacheStore)
+                    ->tags([$this->tags['documents'], $outlineTag])
+                    ->put($key, $outline, $ttl);
+            } else {
+                Cache::store($this->cacheStore)->put($key, $outline, $ttl);
+            }
+
+            if (config('pdf-viewer.monitoring.log_cache')) {
+                Log::debug('Document outline cached', [
+                    'document_hash' => $documentHash,
+                    'cache_key' => $key,
+                    'entries_count' => count($outline),
+                ]);
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to cache document outline', [
+                'document_hash' => $documentHash,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    public function getCachedOutline(string $documentHash): ?array
+    {
+        if (!config('pdf-viewer.cache.enabled', true)) {
+            return null;
+        }
+
+        try {
+            $key = $this->generateCacheKey('outline', ['hash' => $documentHash]);
+            $outlineTag = $this->tags['outline'] ?? 'pdf_viewer_outline';
+
+            if ($this->supportsTags()) {
+                $cached = Cache::store($this->cacheStore)
+                    ->tags([$outlineTag])
+                    ->get($key);
+            } else {
+                $cached = Cache::store($this->cacheStore)->get($key);
+            }
+
+            return $cached;
+        } catch (\Exception $e) {
+            Log::error('Failed to get cached document outline', [
+                'document_hash' => $documentHash,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    public function cacheLinks(string $documentHash, array $links, ?int $ttl = null): bool
+    {
+        if (!config('pdf-viewer.cache.enabled', true)) {
+            return false;
+        }
+
+        try {
+            $key = $this->generateCacheKey('document_links', ['hash' => $documentHash]);
+            $ttl = $ttl ?? config('pdf-viewer.cache.ttl.links', 86400);
+            $linksTag = $this->tags['links'] ?? 'pdf_viewer_links';
+
+            if ($this->supportsTags()) {
+                Cache::store($this->cacheStore)
+                    ->tags([$this->tags['documents'], $linksTag])
+                    ->put($key, $links, $ttl);
+            } else {
+                Cache::store($this->cacheStore)->put($key, $links, $ttl);
+            }
+
+            if (config('pdf-viewer.monitoring.log_cache')) {
+                Log::debug('Document links cached', [
+                    'document_hash' => $documentHash,
+                    'cache_key' => $key,
+                ]);
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to cache document links', [
+                'document_hash' => $documentHash,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    public function getCachedLinks(string $documentHash): ?array
+    {
+        if (!config('pdf-viewer.cache.enabled', true)) {
+            return null;
+        }
+
+        try {
+            $key = $this->generateCacheKey('document_links', ['hash' => $documentHash]);
+            $linksTag = $this->tags['links'] ?? 'pdf_viewer_links';
+
+            if ($this->supportsTags()) {
+                $cached = Cache::store($this->cacheStore)
+                    ->tags([$linksTag])
+                    ->get($key);
+            } else {
+                $cached = Cache::store($this->cacheStore)->get($key);
+            }
+
+            return $cached;
+        } catch (\Exception $e) {
+            Log::error('Failed to get cached document links', [
+                'document_hash' => $documentHash,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    public function cachePageLinks(string $documentHash, int $pageNumber, array $links, ?int $ttl = null): bool
+    {
+        if (!config('pdf-viewer.cache.enabled', true)) {
+            return false;
+        }
+
+        try {
+            $key = $this->generateCacheKey('page_links', [
+                'hash' => $documentHash,
+                'page' => $pageNumber,
+            ]);
+            $ttl = $ttl ?? config('pdf-viewer.cache.ttl.links', 86400);
+            $linksTag = $this->tags['links'] ?? 'pdf_viewer_links';
+
+            if ($this->supportsTags()) {
+                Cache::store($this->cacheStore)
+                    ->tags([$this->tags['pages'], $linksTag])
+                    ->put($key, $links, $ttl);
+            } else {
+                Cache::store($this->cacheStore)->put($key, $links, $ttl);
+            }
+
+            if (config('pdf-viewer.monitoring.log_cache')) {
+                Log::debug('Page links cached', [
+                    'document_hash' => $documentHash,
+                    'page_number' => $pageNumber,
+                    'cache_key' => $key,
+                    'links_count' => count($links),
+                ]);
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to cache page links', [
+                'document_hash' => $documentHash,
+                'page_number' => $pageNumber,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    public function getCachedPageLinks(string $documentHash, int $pageNumber): ?array
+    {
+        if (!config('pdf-viewer.cache.enabled', true)) {
+            return null;
+        }
+
+        try {
+            $key = $this->generateCacheKey('page_links', [
+                'hash' => $documentHash,
+                'page' => $pageNumber,
+            ]);
+            $linksTag = $this->tags['links'] ?? 'pdf_viewer_links';
+
+            if ($this->supportsTags()) {
+                $cached = Cache::store($this->cacheStore)
+                    ->tags([$linksTag])
+                    ->get($key);
+            } else {
+                $cached = Cache::store($this->cacheStore)->get($key);
+            }
+
+            return $cached;
+        } catch (\Exception $e) {
+            Log::error('Failed to get cached page links', [
+                'document_hash' => $documentHash,
+                'page_number' => $pageNumber,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
     public function invalidateDocumentCache(string $documentHash): bool
     {
         try {

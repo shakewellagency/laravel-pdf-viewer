@@ -4,7 +4,7 @@ namespace Shakewellagency\LaravelPdfViewer\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
@@ -16,6 +16,15 @@ use Shakewellagency\LaravelPdfViewer\Services\DocumentProcessingService;
 use Shakewellagency\LaravelPdfViewer\Services\PageProcessingService;
 use Shakewellagency\LaravelPdfViewer\Services\CacheService;
 use Shakewellagency\LaravelPdfViewer\Services\SearchService;
+use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
+use Shakewellagency\LaravelPdfViewer\Services\EdgeCaseDetectionService;
+use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
+use Shakewellagency\LaravelPdfViewer\Console\Commands\BackfillDocumentMetadataCommand;
+use Shakewellagency\LaravelPdfViewer\Console\Commands\CleanupAuditRecordsCommand;
+use Shakewellagency\LaravelPdfViewer\Console\Commands\MonitorSystemHealthCommand;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
+use Shakewellagency\LaravelPdfViewer\Policies\DocumentPolicy;
+use Shakewellagency\LaravelPdfViewer\Middleware\RateLimitPdfViewer;
 
 class PdfViewerServiceProvider extends ServiceProvider
 {
@@ -36,6 +45,11 @@ class PdfViewerServiceProvider extends ServiceProvider
         $this->app->bind(PageProcessingServiceInterface::class, PageProcessingService::class);
         $this->app->bind(CacheServiceInterface::class, CacheService::class);
         $this->app->bind(SearchServiceInterface::class, SearchService::class);
+
+        // Bind supporting services as singletons
+        $this->app->singleton(ExtractionAuditService::class);
+        $this->app->singleton(EdgeCaseDetectionService::class);
+        $this->app->singleton(CrossReferenceService::class);
     }
 
     /**
@@ -54,6 +68,13 @@ class PdfViewerServiceProvider extends ServiceProvider
                 __DIR__ . '/../../database/migrations/' => database_path('migrations'),
             ], 'pdf-viewer-migrations');
 
+            // Register commands
+            $this->commands([
+                BackfillDocumentMetadataCommand::class,
+                CleanupAuditRecordsCommand::class,
+                MonitorSystemHealthCommand::class,
+            ]);
+
             // Publish views if needed in future
             // $this->publishes([
             //     __DIR__ . '/../../resources/views' => resource_path('views/vendor/pdf-viewer'),
@@ -65,6 +86,12 @@ class PdfViewerServiceProvider extends ServiceProvider
 
         // Configure factory discovery for package models
         $this->configureFactories();
+
+        // Register authorization policies
+        $this->registerPolicies();
+
+        // Register middleware alias
+        $this->registerMiddleware();
 
         // Register routes
         $this->registerRoutes();
@@ -85,6 +112,27 @@ class PdfViewerServiceProvider extends ServiceProvider
                 return null; // Use Laravel's default guessing for other models
             });
         }
+    }
+
+    /**
+     * Register authorization policies.
+     */
+    protected function registerPolicies(): void
+    {
+        // Only register policy if enabled in config
+        if (config('pdf-viewer.security.enable_policy', true)) {
+            Gate::policy(PdfDocument::class, DocumentPolicy::class);
+        }
+    }
+
+    /**
+     * Register middleware aliases.
+     */
+    protected function registerMiddleware(): void
+    {
+        // Register middleware alias for rate limiting
+        $router = $this->app->make('router');
+        $router->aliasMiddleware('pdf-viewer.rate-limit', RateLimitPdfViewer::class);
     }
 
     /**

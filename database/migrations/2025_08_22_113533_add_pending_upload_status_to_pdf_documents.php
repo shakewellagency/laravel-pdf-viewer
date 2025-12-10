@@ -9,47 +9,23 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
+     *
+     * Note: SQLite doesn't enforce ENUM constraints - it stores them as TEXT.
+     * Since we're just adding a new valid value, we don't need to modify
+     * the column for SQLite; the new value will work automatically.
      */
     public function up(): void
     {
         // Handle different database drivers
         $driver = Schema::getConnection()->getDriverName();
-        
+
         if ($driver === 'mysql') {
             // MySQL supports direct ENUM modification
             DB::statement("ALTER TABLE pdf_documents MODIFY COLUMN status ENUM('uploaded', 'processing', 'completed', 'failed', 'cancelled', 'pending_upload') NOT NULL DEFAULT 'uploaded'");
-        } else {
-            // For SQLite, use Laravel's schema builder to recreate the table
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                // Drop the index first to avoid conflicts
-                $table->dropIndex('pdf_documents_status_index');
-            });
-            
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                $table->enum('status_temp', [
-                    'uploaded',
-                    'processing',
-                    'completed',
-                    'failed',
-                    'cancelled',
-                    'pending_upload'
-                ])->default('uploaded');
-            });
-            
-            // Copy data from old column to new column
-            DB::statement('UPDATE pdf_documents SET status_temp = status');
-            
-            // Drop the old column and rename
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                $table->dropColumn('status');
-            });
-            
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                $table->renameColumn('status_temp', 'status');
-                // Recreate the index
-                $table->index('status');
-            });
         }
+        // For SQLite and PostgreSQL, no modification needed - the column is TEXT-based
+        // and will accept the new 'pending_upload' value automatically.
+        // Laravel's ENUM is stored as varchar/text in SQLite.
     }
 
     /**
@@ -59,40 +35,15 @@ return new class extends Migration
     {
         // Handle different database drivers
         $driver = Schema::getConnection()->getDriverName();
-        
+
         if ($driver === 'mysql') {
             // MySQL supports direct ENUM modification
+            // First update any pending_upload status to uploaded
+            DB::statement("UPDATE pdf_documents SET status = 'uploaded' WHERE status = 'pending_upload'");
             DB::statement("ALTER TABLE pdf_documents MODIFY COLUMN status ENUM('uploaded', 'processing', 'completed', 'failed', 'cancelled') NOT NULL DEFAULT 'uploaded'");
         } else {
-            // For SQLite, recreate with original enum values
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                // Drop the index first to avoid conflicts
-                $table->dropIndex('pdf_documents_status_index');
-            });
-            
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                $table->enum('status_temp', [
-                    'uploaded',
-                    'processing',
-                    'completed',
-                    'failed',
-                    'cancelled'
-                ])->default('uploaded');
-            });
-            
-            // Copy data from old column to new column, filtering out pending_upload values
-            DB::statement("UPDATE pdf_documents SET status_temp = CASE WHEN status = 'pending_upload' THEN 'uploaded' ELSE status END");
-            
-            // Drop the old column and rename
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                $table->dropColumn('status');
-            });
-            
-            Schema::table('pdf_documents', function (Blueprint $table) {
-                $table->renameColumn('status_temp', 'status');
-                // Recreate the index
-                $table->index('status');
-            });
+            // For SQLite, just update any pending_upload values to uploaded
+            DB::statement("UPDATE pdf_documents SET status = 'uploaded' WHERE status = 'pending_upload'");
         }
     }
 };

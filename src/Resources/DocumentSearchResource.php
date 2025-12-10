@@ -20,8 +20,8 @@ class DocumentSearchResource extends JsonResource
             'status' => $this->status,
             'is_searchable' => $this->is_searchable,
             'metadata' => $this->metadata,
-            'created_at' => $this->created_at->toISOString(),
-            'updated_at' => $this->updated_at->toISOString(),
+            'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
 
         if (isset($this->relevance_score)) {

@@ -6,7 +6,7 @@ use Exception;
 
 class DocumentNotFoundException extends Exception
 {
-    public function __construct($message = "Document not found", $code = 404, Exception $previous = null)
+    public function __construct(string $message = "Document not found", int $code = 404, ?\Throwable $previous = null)
     {
         parent::__construct($message, $code, $previous);
     }

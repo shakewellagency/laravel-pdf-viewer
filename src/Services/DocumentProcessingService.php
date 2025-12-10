@@ -5,11 +5,24 @@ namespace Shakewellagency\LaravelPdfViewer\Services;
 use Illuminate\Support\Facades\Log;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentOutline;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentLink;
 use Shakewellagency\LaravelPdfViewer\Jobs\ProcessDocumentJob;
 use Spatie\PdfToText\Pdf;
 
 class DocumentProcessingService implements DocumentProcessingServiceInterface
 {
+    protected PDFOutlineExtractor $outlineExtractor;
+    protected PDFLinkExtractor $linkExtractor;
+
+    public function __construct(
+        ?PDFOutlineExtractor $outlineExtractor = null,
+        ?PDFLinkExtractor $linkExtractor = null
+    ) {
+        $this->outlineExtractor = $outlineExtractor ?? new PDFOutlineExtractor();
+        $this->linkExtractor = $linkExtractor ?? new PDFLinkExtractor();
+    }
+
     public function process(PdfDocument $document): void
     {
         // Update document status to processing
@@ -37,7 +50,7 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
 
             // Store extracted metadata in normalized structure
             foreach ($metadata as $key => $value) {
-                $document->setMetadata($key, $value);
+                $document->setMetadataByKey($key, $value);
             }
 
             // Update processing step for metadata extraction
@@ -52,6 +65,12 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
                 'completed_items' => 1,
                 'progress_percentage' => 100,
             ]);
+
+            // Extract outline/TOC
+            $this->extractAndStoreOutline($document);
+
+            // Extract links
+            $this->extractAndStoreLinks($document);
 
             // Dispatch the main processing job
             ProcessDocumentJob::dispatch($document);
@@ -311,5 +330,179 @@ class DocumentProcessingService implements DocumentProcessingServiceInterface
         }
 
         return round($bytes, 2) . ' ' . $units[$i];
+    }
+
+    /**
+     * Extract and store PDF outline/TOC
+     */
+    protected function extractAndStoreOutline(PdfDocument $document): void
+    {
+        $document->updateProcessingStep('outline_extraction', [
+            'status' => 'processing',
+            'total_items' => 1,
+            'completed_items' => 0,
+            'progress_percentage' => 0,
+        ]);
+
+        try {
+            $fullPath = storage_path('app/' . $document->file_path);
+            $outlineData = $this->outlineExtractor->extract($fullPath);
+
+            // Clear existing outlines for this document
+            $document->outlines()->delete();
+
+            // Store the hierarchical outline
+            $this->storeOutlineEntries($document, $outlineData, null);
+
+            $outlineCount = $document->outlines()->count();
+
+            $document->updateProcessingStep('outline_extraction', [
+                'status' => 'completed',
+                'total_items' => 1,
+                'completed_items' => 1,
+                'progress_percentage' => 100,
+            ]);
+
+            // Store outline count as metadata
+            $document->setMetadataByKey('outline_count', $outlineCount);
+
+            if (config('pdf-viewer.monitoring.log_processing')) {
+                Log::info('PDF outline extracted', [
+                    'document_hash' => $document->hash,
+                    'outline_count' => $outlineCount,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to extract PDF outline', [
+                'document_hash' => $document->hash,
+                'error' => $e->getMessage(),
+            ]);
+
+            $document->updateProcessingStep('outline_extraction', [
+                'status' => 'completed', // Not failed - outline is optional
+                'total_items' => 1,
+                'completed_items' => 1,
+                'progress_percentage' => 100,
+                'error_message' => 'Outline extraction failed: ' . $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Recursively store outline entries
+     */
+    protected function storeOutlineEntries(PdfDocument $document, array $entries, ?string $parentId, int $sortOrder = 0): void
+    {
+        foreach ($entries as $entry) {
+            $outline = PdfDocumentOutline::create([
+                'pdf_document_id' => $document->id,
+                'parent_id' => $parentId,
+                'title' => $entry['title'],
+                'level' => $entry['level'],
+                'destination_page' => $entry['destination_page'],
+                'destination_type' => PdfDocumentOutline::DESTINATION_TYPE_PAGE,
+                'order_index' => $sortOrder,
+            ]);
+
+            // Store children recursively
+            if (!empty($entry['children'])) {
+                $this->storeOutlineEntries($document, $entry['children'], $outline->id, 0);
+            }
+
+            $sortOrder++;
+        }
+    }
+
+    /**
+     * Extract and store PDF links
+     */
+    protected function extractAndStoreLinks(PdfDocument $document): void
+    {
+        $document->updateProcessingStep('link_extraction', [
+            'status' => 'processing',
+            'total_items' => 1,
+            'completed_items' => 0,
+            'progress_percentage' => 0,
+        ]);
+
+        try {
+            $fullPath = storage_path('app/' . $document->file_path);
+            $linksData = $this->linkExtractor->extract($fullPath);
+
+            // Clear existing links for this document
+            $document->links()->delete();
+
+            // Flatten and store all links
+            $flatLinks = $this->linkExtractor->flatten($linksData);
+            $totalLinks = count($flatLinks);
+            $internalCount = 0;
+            $externalCount = 0;
+
+            foreach ($flatLinks as $linkData) {
+                // Determine destination type based on link type
+                $destinationType = match ($linkData['type']) {
+                    PDFLinkExtractor::LINK_TYPE_INTERNAL => PdfDocumentLink::DESTINATION_TYPE_PAGE,
+                    PDFLinkExtractor::LINK_TYPE_EXTERNAL => PdfDocumentLink::DESTINATION_TYPE_EXTERNAL,
+                    default => PdfDocumentLink::DESTINATION_TYPE_PAGE,
+                };
+
+                PdfDocumentLink::create([
+                    'pdf_document_id' => $document->id,
+                    'source_page' => $linkData['source_page'],
+                    'type' => $linkData['type'], // Legacy field
+                    'destination_type' => $destinationType,
+                    'destination_page' => $linkData['destination_page'],
+                    'destination_url' => $linkData['destination_url'],
+                    'source_rect_x' => $linkData['coordinates']['x'],
+                    'source_rect_y' => $linkData['coordinates']['y'],
+                    'source_rect_width' => $linkData['coordinates']['width'],
+                    'source_rect_height' => $linkData['coordinates']['height'],
+                    'coord_x_percent' => $linkData['normalized_coordinates']['x_percent'],
+                    'coord_y_percent' => $linkData['normalized_coordinates']['y_percent'],
+                    'coord_width_percent' => $linkData['normalized_coordinates']['width_percent'],
+                    'coord_height_percent' => $linkData['normalized_coordinates']['height_percent'],
+                ]);
+
+                if ($linkData['type'] === PDFLinkExtractor::LINK_TYPE_INTERNAL) {
+                    $internalCount++;
+                } elseif ($linkData['type'] === PDFLinkExtractor::LINK_TYPE_EXTERNAL) {
+                    $externalCount++;
+                }
+            }
+
+            $document->updateProcessingStep('link_extraction', [
+                'status' => 'completed',
+                'total_items' => 1,
+                'completed_items' => 1,
+                'progress_percentage' => 100,
+            ]);
+
+            // Store link counts as metadata
+            $document->setMetadataByKey('total_links', $totalLinks);
+            $document->setMetadataByKey('internal_links', $internalCount);
+            $document->setMetadataByKey('external_links', $externalCount);
+
+            if (config('pdf-viewer.monitoring.log_processing')) {
+                Log::info('PDF links extracted', [
+                    'document_hash' => $document->hash,
+                    'total_links' => $totalLinks,
+                    'internal_links' => $internalCount,
+                    'external_links' => $externalCount,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to extract PDF links', [
+                'document_hash' => $document->hash,
+                'error' => $e->getMessage(),
+            ]);
+
+            $document->updateProcessingStep('link_extraction', [
+                'status' => 'completed', // Not failed - links are optional
+                'total_items' => 1,
+                'completed_items' => 1,
+                'progress_percentage' => 100,
+                'error_message' => 'Link extraction failed: ' . $e->getMessage(),
+            ]);
+        }
     }
 }

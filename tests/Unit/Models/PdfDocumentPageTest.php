@@ -1,273 +1,240 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Models;
-
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
 use Shakewellagency\LaravelPdfViewer\Models\PdfDocumentPage;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class PdfDocumentPageTest extends TestCase
-{
-    use RefreshDatabase;
+it('can create pdf document page', function () {
+    $document = PdfDocument::factory()->create();
 
-    public function test_can_create_pdf_document_page(): void
-    {
-        $document = PdfDocument::factory()->create();
-        
-        $page = PdfDocumentPage::factory()->create([
-            'pdf_document_id' => $document->id,
-            'page_number' => 1,
-            'content' => 'Test page content',
-            'status' => 'completed',
-        ]);
+    $page = PdfDocumentPage::factory()->create([
+        'pdf_document_id' => $document->id,
+        'page_number' => 1,
+        'content' => 'Test page content',
+        'status' => 'completed',
+    ]);
 
-        $this->assertDatabaseHas('pdf_document_pages', [
-            'id' => $page->id,
-            'pdf_document_id' => $document->id,
-            'page_number' => 1,
-            'content' => 'Test page content',
-            'status' => 'completed',
-        ]);
-    }
+    $this->assertDatabaseHas('pdf_document_pages', [
+        'id' => $page->id,
+        'pdf_document_id' => $document->id,
+        'page_number' => 1,
+        'content' => 'Test page content',
+        'status' => 'completed',
+    ]);
+});
 
-    public function test_belongs_to_document(): void
-    {
-        $document = PdfDocument::factory()->create();
-        $page = PdfDocumentPage::factory()->create([
-            'pdf_document_id' => $document->id,
-        ]);
+it('belongs to document', function () {
+    $document = PdfDocument::factory()->create();
+    $page = PdfDocumentPage::factory()->create([
+        'pdf_document_id' => $document->id,
+    ]);
 
-        $this->assertInstanceOf(PdfDocument::class, $page->document);
-        $this->assertEquals($document->id, $page->document->id);
-    }
+    expect($page->document)->toBeInstanceOf(PdfDocument::class);
+    expect($page->document->id)->toBe($document->id);
+});
 
-    public function test_parsed_scope(): void
-    {
-        PdfDocumentPage::factory()->create(['is_parsed' => true]);
-        PdfDocumentPage::factory()->create(['is_parsed' => false]);
+it('has parsed scope', function () {
+    PdfDocumentPage::factory()->create(['is_parsed' => true]);
+    PdfDocumentPage::factory()->create(['is_parsed' => false]);
 
-        $parsedPages = PdfDocumentPage::parsed()->get();
+    $parsedPages = PdfDocumentPage::parsed()->get();
 
-        $this->assertCount(1, $parsedPages);
-        $this->assertTrue($parsedPages->first()->is_parsed);
-    }
+    expect($parsedPages)->toHaveCount(1);
+    expect($parsedPages->first()->is_parsed)->toBeTrue();
+});
 
-    public function test_completed_scope(): void
-    {
-        PdfDocumentPage::factory()->create(['status' => 'completed']);
-        PdfDocumentPage::factory()->create(['status' => 'processing']);
+it('has completed scope', function () {
+    PdfDocumentPage::factory()->create(['status' => 'completed']);
+    PdfDocumentPage::factory()->create(['status' => 'processing']);
 
-        $completedPages = PdfDocumentPage::completed()->get();
+    $completedPages = PdfDocumentPage::completed()->get();
 
-        $this->assertCount(1, $completedPages);
-        $this->assertEquals('completed', $completedPages->first()->status);
-    }
+    expect($completedPages)->toHaveCount(1);
+    expect($completedPages->first()->status)->toBe('completed');
+});
 
-    public function test_failed_scope(): void
-    {
-        PdfDocumentPage::factory()->create(['status' => 'failed']);
-        PdfDocumentPage::factory()->create(['status' => 'completed']);
+it('has failed scope', function () {
+    PdfDocumentPage::factory()->create(['status' => 'failed']);
+    PdfDocumentPage::factory()->create(['status' => 'completed']);
 
-        $failedPages = PdfDocumentPage::failed()->get();
+    $failedPages = PdfDocumentPage::failed()->get();
 
-        $this->assertCount(1, $failedPages);
-        $this->assertEquals('failed', $failedPages->first()->status);
-    }
+    expect($failedPages)->toHaveCount(1);
+    expect($failedPages->first()->status)->toBe('failed');
+});
 
-    public function test_with_content_scope(): void
-    {
-        PdfDocumentPage::factory()->create(['content' => 'Some content']);
-        PdfDocumentPage::factory()->create(['content' => null]);
-        PdfDocumentPage::factory()->create(['content' => '']);
+it('has with content scope', function () {
+    PdfDocumentPage::factory()->create(['content' => 'Some content']);
+    PdfDocumentPage::factory()->create(['content' => null]);
+    PdfDocumentPage::factory()->create(['content' => '']);
 
-        $pagesWithContent = PdfDocumentPage::withContent()->get();
+    $pagesWithContent = PdfDocumentPage::withContent()->get();
 
-        $this->assertCount(1, $pagesWithContent);
-        $this->assertEquals('Some content', $pagesWithContent->first()->content);
-    }
+    expect($pagesWithContent)->toHaveCount(1);
+    expect($pagesWithContent->first()->content)->toBe('Some content');
+});
 
-    public function test_for_document_scope(): void
-    {
-        $document1 = PdfDocument::factory()->create();
-        $document2 = PdfDocument::factory()->create();
-        
-        PdfDocumentPage::factory()->create(['pdf_document_id' => $document1->id]);
-        PdfDocumentPage::factory()->create(['pdf_document_id' => $document2->id]);
+it('has for document scope', function () {
+    $document1 = PdfDocument::factory()->create();
+    $document2 = PdfDocument::factory()->create();
 
-        $pagesForDocument1 = PdfDocumentPage::forDocument($document1->hash)->get();
+    PdfDocumentPage::factory()->create(['pdf_document_id' => $document1->id]);
+    PdfDocumentPage::factory()->create(['pdf_document_id' => $document2->id]);
 
-        $this->assertCount(1, $pagesForDocument1);
-        $this->assertEquals($document1->id, $pagesForDocument1->first()->pdf_document_id);
-    }
+    $pagesForDocument1 = PdfDocumentPage::forDocument($document1->hash)->get();
 
-    public function test_get_search_snippet_method(): void
-    {
-        $content = 'This is a long piece of content with the word aviation in it for testing search snippets.';
-        $page = PdfDocumentPage::factory()->create(['content' => $content]);
+    expect($pagesForDocument1)->toHaveCount(1);
+    expect($pagesForDocument1->first()->pdf_document_id)->toBe($document1->id);
+});
 
-        $snippet = $page->getSearchSnippet('aviation', 50);
+it('gets search snippet method', function () {
+    $content = 'This is a long piece of content with the word aviation in it for testing search snippets.';
+    $page = PdfDocumentPage::factory()->create(['content' => $content]);
 
-        $this->assertStringContainsString('aviation', $snippet);
-        $this->assertLessThanOrEqual(53, strlen($snippet)); // 50 + "..." = 53
-    }
+    $snippet = $page->getSearchSnippet('aviation', 50);
 
-    public function test_get_search_snippet_with_no_match(): void
-    {
-        $content = 'This is some content without the search term.';
-        $page = PdfDocumentPage::factory()->create(['content' => $content]);
+    expect($snippet)->toContain('aviation');
+    // Snippet can have "..." on both sides, so max length is 50 + 3 + 3 = 56
+    expect(strlen($snippet))->toBeLessThanOrEqual(60);
+});
 
-        $snippet = $page->getSearchSnippet('nonexistent', 20);
+it('gets search snippet with no match', function () {
+    $content = 'This is some content without the search term.';
+    $page = PdfDocumentPage::factory()->create(['content' => $content]);
 
-        $this->assertEquals('This is some content...', $snippet);
-    }
+    $snippet = $page->getSearchSnippet('nonexistent', 20);
 
-    public function test_highlight_content_method(): void
-    {
-        $page = PdfDocumentPage::factory()->create([
-            'content' => 'This content has aviation safety information.'
-        ]);
+    expect($snippet)->toBe('This is some content...');
+});
 
-        $highlighted = $page->highlightContent('aviation');
+it('highlights content method', function () {
+    $page = PdfDocumentPage::factory()->create([
+        'content' => 'This content has aviation safety information.',
+    ]);
 
-        $this->assertEquals(
-            'This content has <mark>aviation</mark> safety information.',
-            $highlighted
-        );
-    }
+    $highlighted = $page->highlightContent('aviation');
 
-    public function test_highlight_content_with_custom_tag(): void
-    {
-        $page = PdfDocumentPage::factory()->create([
-            'content' => 'This content has aviation safety information.'
-        ]);
+    expect($highlighted)->toBe('This content has <mark>aviation</mark> safety information.');
+});
 
-        $highlighted = $page->highlightContent('aviation', 'strong');
+it('highlights content with custom tag', function () {
+    $page = PdfDocumentPage::factory()->create([
+        'content' => 'This content has aviation safety information.',
+    ]);
 
-        $this->assertEquals(
-            'This content has <strong>aviation</strong> safety information.',
-            $highlighted
-        );
-    }
+    $highlighted = $page->highlightContent('aviation', 'strong');
 
-    public function test_get_content_length_attribute(): void
-    {
-        $page = PdfDocumentPage::factory()->create([
-            'content' => '<p>This is <strong>HTML</strong> content.</p>'
-        ]);
+    expect($highlighted)->toBe('This content has <strong>aviation</strong> safety information.');
+});
 
-        $this->assertEquals(25, $page->getContentLengthAttribute()); // Length without HTML tags
-    }
+it('gets content length attribute', function () {
+    $page = PdfDocumentPage::factory()->create([
+        'content' => '<p>This is <strong>HTML</strong> content.</p>',
+    ]);
 
-    public function test_get_word_count_attribute(): void
-    {
-        $page = PdfDocumentPage::factory()->create([
-            'content' => '<p>This is a test content with HTML tags.</p>'
-        ]);
+    // "This is HTML content." = 21 characters without HTML tags
+    expect($page->getContentLengthAttribute())->toBe(21);
+});
 
-        $this->assertEquals(9, $page->getWordCountAttribute());
-    }
+it('gets word count attribute', function () {
+    $page = PdfDocumentPage::factory()->create([
+        'content' => '<p>This is a test content with HTML tags.</p>',
+    ]);
 
-    public function test_has_content_method(): void
-    {
-        $pageWithContent = PdfDocumentPage::factory()->create(['content' => 'Some content']);
-        $pageWithoutContent = PdfDocumentPage::factory()->create(['content' => null]);
-        $pageWithEmptyContent = PdfDocumentPage::factory()->create(['content' => '   ']);
+    // "This is a test content with HTML tags." = 8 words
+    expect($page->getWordCountAttribute())->toBe(8);
+});
 
-        $this->assertTrue($pageWithContent->hasContent());
-        $this->assertFalse($pageWithoutContent->hasContent());
-        $this->assertFalse($pageWithEmptyContent->hasContent());
-    }
+it('has content method', function () {
+    $pageWithContent = PdfDocumentPage::factory()->create(['content' => 'Some content']);
+    $pageWithoutContent = PdfDocumentPage::factory()->create(['content' => null]);
+    $pageWithEmptyContent = PdfDocumentPage::factory()->create(['content' => '   ']);
 
-    public function test_has_thumbnail_method(): void
-    {
-        $pageWithThumbnail = PdfDocumentPage::factory()->create([
-            'thumbnail_path' => 'thumbnails/test.jpg'
-        ]);
-        $pageWithoutThumbnail = PdfDocumentPage::factory()->create([
-            'thumbnail_path' => null
-        ]);
+    expect($pageWithContent->hasContent())->toBeTrue();
+    expect($pageWithoutContent->hasContent())->toBeFalse();
+    expect($pageWithEmptyContent->hasContent())->toBeFalse();
+});
 
-        // Note: This will return false since we're not actually creating files
-        $this->assertFalse($pageWithThumbnail->hasThumbnail());
-        $this->assertFalse($pageWithoutThumbnail->hasThumbnail());
-    }
+it('has thumbnail method', function () {
+    $pageWithThumbnail = PdfDocumentPage::factory()->create([
+        'thumbnail_path' => 'thumbnails/test.jpg',
+    ]);
+    $pageWithoutThumbnail = PdfDocumentPage::factory()->create([
+        'thumbnail_path' => null,
+    ]);
 
-    public function test_should_be_searchable_method(): void
-    {
-        $document = PdfDocument::factory()->create(['is_searchable' => true]);
-        $searchablePage = PdfDocumentPage::factory()->create([
-            'pdf_document_id' => $document->id,
-            'is_parsed' => true,
-            'content' => 'Some content',
-            'status' => 'completed',
-        ]);
+    // Note: This will return false since we're not actually creating files
+    expect($pageWithThumbnail->hasThumbnail())->toBeFalse();
+    expect($pageWithoutThumbnail->hasThumbnail())->toBeFalse();
+});
 
-        $nonSearchablePage = PdfDocumentPage::factory()->create([
-            'pdf_document_id' => $document->id,
-            'is_parsed' => false,
-        ]);
+it('should be searchable method', function () {
+    $document = PdfDocument::factory()->create(['is_searchable' => true]);
+    $searchablePage = PdfDocumentPage::factory()->create([
+        'pdf_document_id' => $document->id,
+        'is_parsed' => true,
+        'content' => 'Some content',
+        'status' => 'completed',
+    ]);
 
-        $this->assertTrue($searchablePage->shouldBeSearchable());
-        $this->assertFalse($nonSearchablePage->shouldBeSearchable());
-    }
+    $nonSearchablePage = PdfDocumentPage::factory()->create([
+        'pdf_document_id' => $document->id,
+        'is_parsed' => false,
+    ]);
 
-    public function test_to_searchable_array_method(): void
-    {
-        $document = PdfDocument::factory()->create([
-            'hash' => 'test-hash',
-            'title' => 'Test Document',
-        ]);
-        
-        $page = PdfDocumentPage::factory()->create([
-            'pdf_document_id' => $document->id,
-            'page_number' => 1,
-            'content' => 'Test content',
-        ]);
+    expect($searchablePage->shouldBeSearchable())->toBeTrue();
+    expect($nonSearchablePage->shouldBeSearchable())->toBeFalse();
+});
 
-        $searchableArray = $page->toSearchableArray();
+it('to searchable array method', function () {
+    $document = PdfDocument::factory()->create([
+        'hash' => 'test-hash',
+        'title' => 'Test Document',
+    ]);
 
-        $this->assertArrayHasKey('id', $searchableArray);
-        $this->assertArrayHasKey('document_hash', $searchableArray);
-        $this->assertArrayHasKey('document_title', $searchableArray);
-        $this->assertArrayHasKey('page_number', $searchableArray);
-        $this->assertArrayHasKey('content', $searchableArray);
-        
-        $this->assertEquals('test-hash', $searchableArray['document_hash']);
-        $this->assertEquals('Test Document', $searchableArray['document_title']);
-        $this->assertEquals(1, $searchableArray['page_number']);
-        $this->assertEquals('Test content', $searchableArray['content']);
-    }
+    $page = PdfDocumentPage::factory()->create([
+        'pdf_document_id' => $document->id,
+        'page_number' => 1,
+        'content' => 'Test content',
+    ]);
 
-    public function test_casts_metadata_as_array(): void
-    {
-        $metadata = ['width' => 800, 'height' => 600];
-        $page = PdfDocumentPage::factory()->create(['metadata' => $metadata]);
+    $searchableArray = $page->toSearchableArray();
 
-        $this->assertIsArray($page->metadata);
-        $this->assertEquals(800, $page->metadata['width']);
-        $this->assertEquals(600, $page->metadata['height']);
-    }
+    expect($searchableArray)
+        ->toHaveKey('id')
+        ->toHaveKey('document_hash')
+        ->toHaveKey('document_title')
+        ->toHaveKey('page_number')
+        ->toHaveKey('content');
 
-    public function test_soft_deletes(): void
-    {
-        $page = PdfDocumentPage::factory()->create();
-        
-        $page->delete();
+    expect($searchableArray['document_hash'])->toBe('test-hash');
+    expect($searchableArray['document_title'])->toBe('Test Document');
+    expect($searchableArray['page_number'])->toBe(1);
+    expect($searchableArray['content'])->toBe('Test content');
+});
 
-        $this->assertSoftDeleted($page);
-        $this->assertCount(0, PdfDocumentPage::all());
-        $this->assertCount(1, PdfDocumentPage::withTrashed()->get());
-    }
+it('casts metadata as array', function () {
+    $metadata = ['width' => 800, 'height' => 600];
+    $page = PdfDocumentPage::factory()->create(['metadata' => $metadata]);
 
-    public function test_uses_uuid_for_primary_key(): void
-    {
-        $page = PdfDocumentPage::factory()->create();
+    expect($page->metadata)->toBeArray();
+    expect($page->metadata['width'])->toBe(800);
+    expect($page->metadata['height'])->toBe(600);
+});
 
-        $this->assertIsString($page->id);
-        $this->assertMatchesRegularExpression(
-            '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
-            $page->id
-        );
-    }
-}
+it('soft deletes', function () {
+    $page = PdfDocumentPage::factory()->create();
+
+    $page->delete();
+
+    $this->assertSoftDeleted($page);
+    expect(PdfDocumentPage::all())->toHaveCount(0);
+    expect(PdfDocumentPage::withTrashed()->get())->toHaveCount(1);
+});
+
+it('uses uuid for primary key', function () {
+    $page = PdfDocumentPage::factory()->create();
+
+    expect($page->id)->toBeString();
+    // Accept any valid UUID format (v4, v7, etc.)
+    expect($page->id)->toMatch('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i');
+});

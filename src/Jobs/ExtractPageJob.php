@@ -75,14 +75,23 @@ class ExtractPageJob implements ShouldQueue
             // Record page completion in audit trail
             $auditService->recordPageCompletion($audit, $this->pageNumber, $extractionResult['context']);
 
-            // Update page with file path and extraction metadata
+            // Update page with file path
             $page->update([
                 'page_file_path' => $extractionResult['file_path'],
-                'metadata' => array_merge($page->metadata ?? [], [
-                    'extraction' => $extractionResult['context'],
-                    'extracted_at' => now()->toISOString(),
-                ]),
             ]);
+
+            // Store extraction metadata using the proper metadata relationship
+            // Wrap in try-catch to not fail the job if metadata storage fails
+            try {
+                $page->setMetadataByKey('extraction', $extractionResult['context']);
+                $page->setMetadataByKey('extracted_at', now()->toISOString());
+            } catch (\Exception $e) {
+                Log::warning('Failed to store extraction metadata', [
+                    'document_hash' => $this->document->hash,
+                    'page_number' => $this->pageNumber,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             // Generate thumbnail if enabled
             if (config('pdf-viewer.thumbnails.enabled', true)) {
@@ -177,14 +186,15 @@ class ExtractPageJob implements ShouldQueue
     protected function checkDocumentCompletion(): void
     {
         $totalPages = $this->document->page_count;
-        $completedPages = $this->document->pages()
+        $processedPages = $this->document->pages()
             ->whereIn('status', ['completed', 'failed'])
             ->count();
 
-        if ($completedPages >= $totalPages) {
+        if ($processedPages >= $totalPages) {
             // All pages have been processed (successfully or failed)
             $failedPages = $this->document->failedPages()->count();
-            
+            $completedPages = $this->document->completedPages()->count();
+
             if ($failedPages > 0) {
                 Log::warning('Document processing completed with failures', [
                     'document_hash' => $this->document->hash,
@@ -195,7 +205,7 @@ class ExtractPageJob implements ShouldQueue
 
             // Update document status based on page results
             $status = $failedPages === $totalPages ? 'failed' : 'completed';
-            
+
             $this->document->update([
                 'status' => $status,
                 'processing_completed_at' => now(),

@@ -1,62 +1,46 @@
 <?php
 
-namespace Shakewellagency\LaravelPdfViewer\Tests\Unit\Exceptions;
-
 use Shakewellagency\LaravelPdfViewer\Exceptions\DocumentNotFoundException;
-use Shakewellagency\LaravelPdfViewer\Tests\TestCase;
 
-class DocumentNotFoundExceptionTest extends TestCase
-{
-    public function test_exception_has_default_values(): void
-    {
-        $exception = new DocumentNotFoundException();
+it('has default values', function () {
+    $exception = new DocumentNotFoundException();
 
-        $this->assertEquals("Document not found", $exception->getMessage());
-        $this->assertEquals(404, $exception->getCode());
-        $this->assertNull($exception->getPrevious());
-    }
+    expect($exception->getMessage())->toBe('Document not found');
+    expect($exception->getCode())->toBe(404);
+    expect($exception->getPrevious())->toBeNull();
+});
 
-    public function test_exception_with_custom_message(): void
-    {
-        $message = "Custom document not found message";
-        $exception = new DocumentNotFoundException($message);
+it('accepts custom message', function () {
+    $message = 'Custom document not found message';
+    $exception = new DocumentNotFoundException($message);
 
-        $this->assertEquals($message, $exception->getMessage());
-        $this->assertEquals(404, $exception->getCode());
-    }
+    expect($exception->getMessage())->toBe($message);
+    expect($exception->getCode())->toBe(404);
+});
 
-    public function test_exception_with_custom_code(): void
-    {
-        $code = 500;
-        $exception = new DocumentNotFoundException("Message", $code);
+it('accepts custom code', function () {
+    $code = 500;
+    $exception = new DocumentNotFoundException('Message', $code);
 
-        $this->assertEquals("Message", $exception->getMessage());
-        $this->assertEquals($code, $exception->getCode());
-    }
+    expect($exception->getMessage())->toBe('Message');
+    expect($exception->getCode())->toBe($code);
+});
 
-    public function test_exception_with_previous(): void
-    {
-        $previous = new \Exception("Previous exception");
-        $exception = new DocumentNotFoundException("Message", 404, $previous);
+it('accepts previous exception', function () {
+    $previous = new \Exception('Previous exception');
+    $exception = new DocumentNotFoundException('Message', 404, $previous);
 
-        $this->assertEquals("Message", $exception->getMessage());
-        $this->assertEquals(404, $exception->getCode());
-        $this->assertSame($previous, $exception->getPrevious());
-    }
+    expect($exception->getMessage())->toBe('Message');
+    expect($exception->getCode())->toBe(404);
+    expect($exception->getPrevious())->toBe($previous);
+});
 
-    public function test_exception_is_throwable(): void
-    {
-        $this->expectException(DocumentNotFoundException::class);
-        $this->expectExceptionMessage("Test exception");
-        $this->expectExceptionCode(404);
+it('is throwable', function () {
+    throw new DocumentNotFoundException('Test exception');
+})->throws(DocumentNotFoundException::class, 'Test exception');
 
-        throw new DocumentNotFoundException("Test exception");
-    }
+it('extends base exception', function () {
+    $exception = new DocumentNotFoundException();
 
-    public function test_exception_extends_base_exception(): void
-    {
-        $exception = new DocumentNotFoundException();
-
-        $this->assertInstanceOf(\Exception::class, $exception);
-    }
-}
+    expect($exception)->toBeInstanceOf(\Exception::class);
+});

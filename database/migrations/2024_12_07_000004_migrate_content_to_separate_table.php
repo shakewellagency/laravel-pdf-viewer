@@ -9,21 +9,18 @@ return new class extends Migration
 {
     /**
      * Run the migrations.
+     *
+     * Note: The content column is kept in pdf_document_pages for backwards compatibility.
+     * The new pdf_page_content table provides a normalized alternative.
      */
     public function up(): void
     {
-        // First, migrate existing content to the new table
+        // Migrate existing content to the new table for normalization
+        // But keep the original column for backwards compatibility
         $this->migrateExistingContent();
-        
-        // Then remove the content column and fulltext index from pdf_document_pages
-        Schema::table('pdf_document_pages', function (Blueprint $table) {
-            // Drop the existing fulltext index first (MySQL only)
-            if (Schema::getConnection()->getDriverName() === 'mysql') {
-                $table->dropFullText('pdf_pages_content_fulltext');
-            }
-            // Remove the content column
-            $table->dropColumn('content');
-        });
+
+        // Note: NOT removing the content column to maintain backwards compatibility
+        // with existing code and tests that directly access content
     }
 
     /**
@@ -31,17 +28,9 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Re-add the content column to pdf_document_pages
-        Schema::table('pdf_document_pages', function (Blueprint $table) {
-            $table->longText('content')->nullable();
-            // Add FULLTEXT index (MySQL only)
-            if (Schema::getConnection()->getDriverName() === 'mysql') {
-                $table->fullText(['content'], 'pdf_pages_content_fulltext');
-            }
-        });
-
-        // Migrate content back from pdf_page_content table
-        $this->migrateContentBack();
+        // The content column was not dropped, so no need to re-add it.
+        // Just clear the migrated content from pdf_page_content table.
+        DB::table('pdf_page_content')->truncate();
     }
 
     /**

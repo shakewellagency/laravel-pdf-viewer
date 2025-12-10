@@ -6,7 +6,7 @@ use Exception;
 
 class InvalidFileTypeException extends Exception
 {
-    public function __construct($message = "Invalid file type", $code = 422, Exception $previous = null)
+    public function __construct(string $message = "Invalid file type", int $code = 422, ?\Throwable $previous = null)
     {
         parent::__construct($message, $code, $previous);
     }

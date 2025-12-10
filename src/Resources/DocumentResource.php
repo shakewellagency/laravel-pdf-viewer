@@ -24,8 +24,8 @@ class DocumentResource extends JsonResource
             'processing_completed_at' => $this->processing_completed_at?->toISOString(),
             'metadata' => $this->metadata,
             'created_by' => $this->created_by,
-            'created_at' => $this->created_at->toISOString(),
-            'updated_at' => $this->updated_at->toISOString(),
+            'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
 
         if (in_array($this->status, ['processing', 'failed'])) {

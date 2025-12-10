@@ -18,6 +18,11 @@ abstract class TestCase extends Orchestra
 {
     use RefreshDatabase, WithFaker;
 
+    /**
+     * The latest response (for compatibility with older Orchestra Testbench versions).
+     */
+    protected static ?\Illuminate\Testing\TestResponse $latestResponse = null;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -77,7 +82,6 @@ abstract class TestCase extends Orchestra
     {
         return [
             PdfViewerServiceProvider::class,
-            \Laravel\Sanctum\SanctumServiceProvider::class,
         ];
     }
     
@@ -114,7 +118,8 @@ abstract class TestCase extends Orchestra
         
         // Configure package routes
         $app['config']->set('pdf-viewer.route_prefix', 'api/pdf-viewer');
-        $app['config']->set('pdf-viewer.middleware', ['api', 'auth:sanctum']);
+        // Use 'api' middleware without auth for testing - auth guard can be configured by consuming app
+        $app['config']->set('pdf-viewer.middleware', ['api']);
     }
 
     protected function defineDatabaseMigrations()
@@ -124,6 +129,9 @@ abstract class TestCase extends Orchestra
 
     protected function getEnvironmentSetUp($app): void
     {
+        // Set app key for encryption/URL signing
+        $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
+
         config()->set('database.default', 'testing');
         config()->set('database.connections.testing', [
             'driver' => 'sqlite',
