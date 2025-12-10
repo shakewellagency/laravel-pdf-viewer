@@ -140,3 +140,130 @@ it('clears all cache removes all data', function () {
     expect($this->cacheService->getCachedDocumentMetadata('hash1'))->toBeNull();
     expect($this->cacheService->getCachedSearchResults('query'))->toBeNull();
 });
+
+it('caches document outline stores data', function () {
+    $hash = 'test-document-hash';
+    $outline = [
+        'data' => [
+            ['id' => 'uuid-1', 'title' => 'Chapter 1', 'level' => 0, 'destination_page' => 1],
+            ['id' => 'uuid-2', 'title' => 'Chapter 2', 'level' => 0, 'destination_page' => 10],
+        ],
+        'meta' => [
+            'document_hash' => $hash,
+            'has_outline' => true,
+            'total_entries' => 2,
+        ],
+    ];
+
+    $result = $this->cacheService->cacheOutline($hash, $outline);
+
+    expect($result)->toBeTrue();
+
+    $cached = $this->cacheService->getCachedOutline($hash);
+    expect($cached)->toBe($outline);
+});
+
+it('returns null when outline not cached', function () {
+    $result = $this->cacheService->getCachedOutline('non-existent-hash');
+
+    expect($result)->toBeNull();
+});
+
+it('caches document links stores data', function () {
+    $hash = 'test-document-hash';
+    $links = [
+        'data' => [
+            'summary' => [
+                'total_links' => 10,
+                'internal_links' => 7,
+                'external_links' => 3,
+            ],
+            'links_by_page' => [],
+        ],
+        'meta' => [
+            'document_hash' => $hash,
+            'has_links' => true,
+        ],
+    ];
+
+    $result = $this->cacheService->cacheLinks($hash, $links);
+
+    expect($result)->toBeTrue();
+
+    $cached = $this->cacheService->getCachedLinks($hash);
+    expect($cached)->toBe($links);
+});
+
+it('returns null when links not cached', function () {
+    $result = $this->cacheService->getCachedLinks('non-existent-hash');
+
+    expect($result)->toBeNull();
+});
+
+it('caches page links stores data', function () {
+    $hash = 'test-document-hash';
+    $pageNumber = 5;
+    $pageLinks = [
+        'data' => [
+            ['id' => 'uuid-1', 'type' => 'internal', 'destination_page' => 10],
+            ['id' => 'uuid-2', 'type' => 'external', 'destination_url' => 'https://example.com'],
+        ],
+        'meta' => [
+            'document_hash' => $hash,
+            'page_number' => $pageNumber,
+            'total_links' => 2,
+        ],
+    ];
+
+    $result = $this->cacheService->cachePageLinks($hash, $pageNumber, $pageLinks);
+
+    expect($result)->toBeTrue();
+
+    $cached = $this->cacheService->getCachedPageLinks($hash, $pageNumber);
+    expect($cached)->toBe($pageLinks);
+});
+
+it('returns null when page links not cached', function () {
+    $result = $this->cacheService->getCachedPageLinks('non-existent-hash', 1);
+
+    expect($result)->toBeNull();
+});
+
+it('caches different pages separately', function () {
+    $hash = 'test-document-hash';
+    $page1Links = ['data' => [['id' => 'page1-link']], 'meta' => ['page_number' => 1]];
+    $page2Links = ['data' => [['id' => 'page2-link']], 'meta' => ['page_number' => 2]];
+
+    $this->cacheService->cachePageLinks($hash, 1, $page1Links);
+    $this->cacheService->cachePageLinks($hash, 2, $page2Links);
+
+    $cached1 = $this->cacheService->getCachedPageLinks($hash, 1);
+    $cached2 = $this->cacheService->getCachedPageLinks($hash, 2);
+
+    expect($cached1)->toBe($page1Links);
+    expect($cached2)->toBe($page2Links);
+});
+
+it('respects cache disabled config for outline', function () {
+    config(['pdf-viewer.cache.enabled' => false]);
+
+    $result = $this->cacheService->cacheOutline('hash', ['data' => []]);
+    expect($result)->toBeFalse();
+
+    $cached = $this->cacheService->getCachedOutline('hash');
+    expect($cached)->toBeNull();
+
+    config(['pdf-viewer.cache.enabled' => true]);
+});
+
+it('respects cache disabled config for links', function () {
+    config(['pdf-viewer.cache.enabled' => false]);
+
+    $result = $this->cacheService->cacheLinks('hash', ['data' => []]);
+    expect($result)->toBeFalse();
+
+    $cached = $this->cacheService->getCachedLinks('hash');
+    expect($cached)->toBeNull();
+
+    config(['pdf-viewer.cache.enabled' => true]);
+});
