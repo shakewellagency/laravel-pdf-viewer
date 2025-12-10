@@ -19,6 +19,9 @@ use Shakewellagency\LaravelPdfViewer\Services\SearchService;
 use Shakewellagency\LaravelPdfViewer\Services\ExtractionAuditService;
 use Shakewellagency\LaravelPdfViewer\Services\EdgeCaseDetectionService;
 use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
+use Shakewellagency\LaravelPdfViewer\Console\Commands\BackfillDocumentMetadataCommand;
+use Shakewellagency\LaravelPdfViewer\Console\Commands\CleanupAuditRecordsCommand;
+use Shakewellagency\LaravelPdfViewer\Console\Commands\MonitorSystemHealthCommand;
 
 class PdfViewerServiceProvider extends ServiceProvider
 {
@@ -61,6 +64,13 @@ class PdfViewerServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../../database/migrations/' => database_path('migrations'),
             ], 'pdf-viewer-migrations');
+
+            // Register commands
+            $this->commands([
+                BackfillDocumentMetadataCommand::class,
+                CleanupAuditRecordsCommand::class,
+                MonitorSystemHealthCommand::class,
+            ]);
 
             // Publish views if needed in future
             // $this->publishes([
