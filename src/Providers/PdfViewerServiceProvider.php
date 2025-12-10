@@ -4,7 +4,7 @@ namespace Shakewellagency\LaravelPdfViewer\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
@@ -22,6 +22,9 @@ use Shakewellagency\LaravelPdfViewer\Services\CrossReferenceService;
 use Shakewellagency\LaravelPdfViewer\Console\Commands\BackfillDocumentMetadataCommand;
 use Shakewellagency\LaravelPdfViewer\Console\Commands\CleanupAuditRecordsCommand;
 use Shakewellagency\LaravelPdfViewer\Console\Commands\MonitorSystemHealthCommand;
+use Shakewellagency\LaravelPdfViewer\Models\PdfDocument;
+use Shakewellagency\LaravelPdfViewer\Policies\DocumentPolicy;
+use Shakewellagency\LaravelPdfViewer\Middleware\RateLimitPdfViewer;
 
 class PdfViewerServiceProvider extends ServiceProvider
 {
@@ -84,6 +87,12 @@ class PdfViewerServiceProvider extends ServiceProvider
         // Configure factory discovery for package models
         $this->configureFactories();
 
+        // Register authorization policies
+        $this->registerPolicies();
+
+        // Register middleware alias
+        $this->registerMiddleware();
+
         // Register routes
         $this->registerRoutes();
     }
@@ -103,6 +112,27 @@ class PdfViewerServiceProvider extends ServiceProvider
                 return null; // Use Laravel's default guessing for other models
             });
         }
+    }
+
+    /**
+     * Register authorization policies.
+     */
+    protected function registerPolicies(): void
+    {
+        // Only register policy if enabled in config
+        if (config('pdf-viewer.security.enable_policy', true)) {
+            Gate::policy(PdfDocument::class, DocumentPolicy::class);
+        }
+    }
+
+    /**
+     * Register middleware aliases.
+     */
+    protected function registerMiddleware(): void
+    {
+        // Register middleware alias for rate limiting
+        $router = $this->app->make('router');
+        $router->aliasMiddleware('pdf-viewer.rate-limit', RateLimitPdfViewer::class);
     }
 
     /**

@@ -248,7 +248,20 @@ return [
         'hash_algorithm' => env('PDF_VIEWER_HASH_ALGORITHM', 'sha256'),
         'salt' => env('PDF_VIEWER_SALT', env('APP_KEY')),
         'max_upload_attempts' => env('PDF_VIEWER_MAX_UPLOAD_ATTEMPTS', 5),
-        'rate_limit' => env('PDF_VIEWER_RATE_LIMIT', 60), // requests per minute
+
+        // Rate limiting settings (requests per minute)
+        'rate_limit_enabled' => env('PDF_VIEWER_RATE_LIMIT_ENABLED', true),
+        'rate_limit' => env('PDF_VIEWER_RATE_LIMIT', 60), // General API requests
+        'rate_limit_upload' => env('PDF_VIEWER_RATE_LIMIT_UPLOAD', 10), // Document uploads
+        'rate_limit_search' => env('PDF_VIEWER_RATE_LIMIT_SEARCH', 30), // Search requests
+        'rate_limit_download' => env('PDF_VIEWER_RATE_LIMIT_DOWNLOAD', 100), // Downloads
+
+        // Authorization policy (can be disabled for custom implementation)
+        'enable_policy' => env('PDF_VIEWER_ENABLE_POLICY', true),
+
+        // Input sanitization
+        'sanitize_filenames' => env('PDF_VIEWER_SANITIZE_FILENAMES', true),
+        'max_filename_length' => env('PDF_VIEWER_MAX_FILENAME_LENGTH', 200),
     ],
 
     /*
