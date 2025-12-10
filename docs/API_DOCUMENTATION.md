@@ -1,589 +1,56 @@
-# Laravel PDF Viewer Package - API Documentation
+# PDF Viewer API Documentation
 
-## Overview
+This document provides usage examples for the Table of Contents (TOC) and Links endpoints.
 
-The Laravel PDF Viewer Package provides a comprehensive RESTful API for handling massive PDF documents with page-by-page processing, full-text search capabilities, and parallel job processing. All API endpoints require authentication and return JSON responses.
+## Table of Contents
 
-## Base URL
+1. [Authentication](#authentication)
+2. [Outline/TOC Endpoints](#outlinetoc-endpoints)
+3. [Links Endpoints](#links-endpoints)
+4. [Code Examples](#code-examples)
+5. [Error Handling](#error-handling)
 
-```
-{base_url}/api/pdf-viewer
-```
+---
 
 ## Authentication
 
-All API endpoints require authentication using Bearer tokens:
+All API endpoints require authentication via Laravel Sanctum Bearer tokens.
 
-```http
-Authorization: Bearer {your_auth_token}
-```
-
-## Response Format
-
-All API responses follow a consistent JSON structure:
-
-### Success Response
-```json
-{
-  "message": "Success message",
-  "data": {
-    // Response data
-  },
-  "meta": {
-    // Pagination or additional metadata (when applicable)
-  }
-}
-```
-
-### Error Response
-```json
-{
-  "message": "Error message",
-  "errors": {
-    "field_name": ["Validation error messages"]
-  }
-}
-```
-
-## HTTP Status Codes
-
-- `200` - OK: Request successful
-- `201` - Created: Resource created successfully
-- `400` - Bad Request: Invalid request data
-- `401` - Unauthorized: Authentication required
-- `404` - Not Found: Resource not found
-- `422` - Unprocessable Entity: Validation errors
-- `500` - Internal Server Error: Server error
-
----
-
-## Document Management
-
-### Upload PDF Document
-
-Upload a PDF document for processing with parallel page extraction and text analysis.
-
-**Endpoint:** `POST /documents`
-
-**Content-Type:** `multipart/form-data`
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file` | File | Yes | PDF file to upload (max size configurable) |
-| `title` | String | No | Document title (derived from filename if not provided) |
-| `description` | String | No | Document description |
-| `metadata[author]` | String | No | Document author (max 255 chars) |
-| `metadata[subject]` | String | No | Document subject (max 255 chars) |
-| `metadata[keywords]` | String | No | Document keywords (max 1000 chars) |
-| `metadata[*]` | String | No | Additional metadata fields |
-
-**Example Request:**
 ```bash
-curl -X POST \
-  {base_url}/api/pdf-viewer/documents \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json' \
-  -F 'file=@aviation-manual.pdf' \
-  -F 'title=Aviation Safety Manual' \
-  -F 'description=Comprehensive aviation safety procedures' \
-  -F 'metadata[author]=Aviation Authority' \
-  -F 'metadata[subject]=Safety Procedures'
-```
-
-**Response (201):**
-```json
-{
-  "message": "Document uploaded successfully and queued for processing",
-  "data": {
-    "id": "123e4567-e89b-12d3-a456-426614174000",
-    "hash": "abc123def456789...",
-    "title": "Aviation Safety Manual",
-    "filename": "aviation-manual.pdf",
-    "file_size": 15728640,
-    "status": "uploaded",
-    "created_at": "2024-08-22T10:30:00.000000Z"
-  }
-}
-```
-
-### List Documents
-
-Retrieve a paginated list of documents with optional filtering.
-
-**Endpoint:** `GET /documents`
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `page` | Integer | No | 1 | Page number for pagination |
-| `per_page` | Integer | No | 15 | Items per page (max 100) |
-| `status` | String | No | - | Filter by status: `uploaded`, `processing`, `completed`, `failed` |
-| `search` | String | No | - | Search in title and description |
-| `date_from` | Date | No | - | Filter documents created from date (Y-m-d) |
-| `date_to` | Date | No | - | Filter documents created until date (Y-m-d) |
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/documents?page=1&per_page=10&status=completed&search=aviation' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "data": [
-    {
-      "id": "123e4567-e89b-12d3-a456-426614174000",
-      "hash": "abc123def456789...",
-      "title": "Aviation Safety Manual",
-      "filename": "aviation-manual.pdf",
-      "file_size": 15728640,
-      "formatted_file_size": "15.0 MB",
-      "page_count": 150,
-      "status": "completed",
-      "is_searchable": true,
-      "metadata": {
-        "author": "Aviation Authority",
-        "subject": "Safety Procedures"
-      },
-      "created_at": "2024-08-22T10:30:00.000000Z",
-      "updated_at": "2024-08-22T11:00:00.000000Z"
-    }
-  ],
-  "meta": {
-    "current_page": 1,
-    "per_page": 10,
-    "total": 1,
-    "last_page": 1
-  }
-}
-```
-
-### Get Document Metadata
-
-Retrieve detailed metadata for a specific document.
-
-**Endpoint:** `GET /documents/{document_hash}`
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "data": {
-    "id": "123e4567-e89b-12d3-a456-426614174000",
-    "hash": "abc123def456789...",
-    "title": "Aviation Safety Manual",
-    "filename": "aviation-manual.pdf",
-    "file_size": 15728640,
-    "formatted_file_size": "15.0 MB",
-    "page_count": 150,
-    "status": "completed",
-    "is_searchable": true,
-    "metadata": {
-      "author": "Aviation Authority",
-      "subject": "Safety Procedures",
-      "keywords": "aviation, safety, procedures"
-    },
-    "processing_started_at": "2024-08-22T10:31:00.000000Z",
-    "processing_completed_at": "2024-08-22T10:45:00.000000Z",
-    "created_at": "2024-08-22T10:30:00.000000Z",
-    "updated_at": "2024-08-22T10:45:00.000000Z"
-  }
-}
-```
-
-### Update Document Metadata
-
-Update metadata for an existing document.
-
-**Endpoint:** `PUT /documents/{document_hash}`
-
-**Content-Type:** `application/json`
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `title` | String | No | Updated document title |
-| `description` | String | No | Updated document description |
-| `metadata` | Object | No | Updated metadata object |
-
-**Example Request:**
-```bash
-curl -X PUT \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -d '{
-    "title": "Updated Aviation Safety Manual",
-    "description": "Updated comprehensive aviation safety procedures",
-    "metadata": {
-      "author": "Updated Aviation Authority",
-      "version": "2.0"
-    }
-  }'
-```
-
-**Response (200):**
-```json
-{
-  "message": "Document metadata updated successfully",
-  "data": {
-    "id": "123e4567-e89b-12d3-a456-426614174000",
-    "hash": "abc123def456789...",
-    "title": "Updated Aviation Safety Manual",
-    "description": "Updated comprehensive aviation safety procedures",
-    "metadata": {
-      "author": "Updated Aviation Authority",
-      "subject": "Safety Procedures",
-      "version": "2.0"
-    },
-    "updated_at": "2024-08-22T12:00:00.000000Z"
-  }
-}
-```
-
-### Get Processing Progress
-
-Get detailed processing progress for a document.
-
-**Endpoint:** `GET /documents/{document_hash}/progress`
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789/progress' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "data": {
-    "status": "processing",
-    "progress_percentage": 75.5,
-    "total_pages": 150,
-    "completed_pages": 113,
-    "processing_pages": 12,
-    "failed_pages": 1,
-    "pending_pages": 24,
-    "processing_started_at": "2024-08-22T10:31:00.000000Z",
-    "estimated_completion": "2024-08-22T10:50:00.000000Z"
-  }
-}
-```
-
-### Delete Document
-
-Soft delete a document and clean up associated files and caches.
-
-**Endpoint:** `DELETE /documents/{document_hash}`
-
-**Example Request:**
-```bash
-curl -X DELETE \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "message": "Document deleted successfully"
-}
+# Example request with authentication
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Accept: application/json" \
+     https://api.example.com/api/pdf-viewer/documents/{hash}/outline
 ```
 
 ---
 
-## Page Management
+## Outline/TOC Endpoints
 
-### List Document Pages
+### GET /documents/{document_hash}/outline
 
-Get a paginated list of pages for a specific document.
+Retrieves the hierarchical Table of Contents for a PDF document.
 
-**Endpoint:** `GET /documents/{document_hash}/pages`
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `page` | Integer | No | 1 | Page number for pagination |
-| `per_page` | Integer | No | 20 | Items per page (max 100) |
-| `status` | String | No | - | Filter by page status: `pending`, `processing`, `completed`, `failed` |
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789/pages?page=1&per_page=20' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
+**Response Structure:**
 ```json
 {
   "data": [
     {
-      "id": "page-uuid-1",
-      "page_number": 1,
-      "content_length": 1250,
-      "word_count": 180,
-      "status": "completed",
-      "has_thumbnail": true,
-      "thumbnail_url": "{base_url}/api/pdf-viewer/documents/abc123def456789/pages/1/thumbnail",
-      "processing_completed_at": "2024-08-22T10:32:00.000000Z",
-      "created_at": "2024-08-22T10:31:00.000000Z",
-      "updated_at": "2024-08-22T10:32:00.000000Z"
-    }
-  ],
-  "meta": {
-    "current_page": 1,
-    "per_page": 20,
-    "total": 150,
-    "last_page": 8
-  }
-}
-```
-
-### Get Specific Page
-
-Retrieve content and metadata for a specific page.
-
-**Endpoint:** `GET /documents/{document_hash}/pages/{page_number}`
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789/pages/1' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "data": {
-    "id": "page-uuid-1",
-    "page_number": 1,
-    "content": "This page contains aviation safety procedures and emergency protocols...",
-    "content_length": 1250,
-    "word_count": 180,
-    "status": "completed",
-    "has_thumbnail": true,
-    "thumbnail_url": "{base_url}/api/pdf-viewer/documents/abc123def456789/pages/1/thumbnail",
-    "processing_started_at": "2024-08-22T10:31:30.000000Z",
-    "processing_completed_at": "2024-08-22T10:32:00.000000Z",
-    "created_at": "2024-08-22T10:31:00.000000Z",
-    "updated_at": "2024-08-22T10:32:00.000000Z"
-  }
-}
-```
-
-### Get Page Thumbnail
-
-Retrieve the thumbnail image for a specific page.
-
-**Endpoint:** `GET /documents/{document_hash}/pages/{page_number}/thumbnail`
-
-**Response:** Binary image data (JPEG format)
-
-**Headers:**
-- `Content-Type: image/jpeg`
-- `Content-Length: {size_in_bytes}`
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/documents/abc123def456789/pages/1/thumbnail' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: image/jpeg' \
-  --output page-1-thumbnail.jpg
-```
-
----
-
-## Search Operations
-
-### Search Documents
-
-Perform full-text search across document titles, descriptions, and metadata.
-
-**Endpoint:** `GET /search/documents`
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `q` | String | Yes | - | Search query (minimum 2 characters) |
-| `page` | Integer | No | 1 | Page number for pagination |
-| `per_page` | Integer | No | 10 | Items per page (max 50) |
-| `status` | String | No | - | Filter by document status |
-| `date_from` | Date | No | - | Filter documents created from date (Y-m-d) |
-| `date_to` | Date | No | - | Filter documents created until date (Y-m-d) |
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/search/documents?q=aviation%20safety&status=completed&per_page=10' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "data": [
-    {
-      "id": "123e4567-e89b-12d3-a456-426614174000",
-      "hash": "abc123def456789...",
-      "title": "Aviation Safety Manual",
-      "filename": "aviation-manual.pdf",
-      "file_size": 15728640,
-      "formatted_file_size": "15.0 MB",
-      "page_count": 150,
-      "status": "completed",
-      "is_searchable": true,
-      "relevance_score": 0.8542,
-      "search_snippets": [
-        "...comprehensive <mark>aviation safety</mark> procedures for emergency situations...",
-        "...updated <mark>safety</mark> protocols for <mark>aviation</mark> personnel..."
-      ],
-      "matching_pages": 23,
-      "metadata": {
-        "author": "Aviation Authority",
-        "subject": "Safety Procedures"
-      },
-      "created_at": "2024-08-22T10:30:00.000000Z",
-      "updated_at": "2024-08-22T11:00:00.000000Z"
-    }
-  ],
-  "meta": {
-    "current_page": 1,
-    "per_page": 10,
-    "total": 1,
-    "last_page": 1,
-    "search_time_ms": 45
-  }
-}
-```
-
-### Search Pages
-
-Perform full-text search within page content with highlighted snippets.
-
-**Endpoint:** `GET /search/pages`
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `q` | String | Yes | - | Search query (minimum 2 characters) |
-| `page` | Integer | No | 1 | Page number for pagination |
-| `per_page` | Integer | No | 10 | Items per page (max 50) |
-| `highlight` | Boolean | No | true | Include highlighted content |
-| `include_full_content` | Boolean | No | false | Include full page content (use sparingly) |
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/search/pages?q=emergency%20procedures&highlight=true&per_page=10' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "data": [
-    {
-      "id": "page-uuid-1",
-      "page_number": 15,
-      "content_length": 1850,
-      "word_count": 275,
-      "relevance_score": 0.9231,
-      "search_snippet": "...In case of <mark>emergency procedures</mark>, pilots must follow the established safety protocols...",
-      "highlighted_content": "...comprehensive guide for <mark>emergency procedures</mark> including evacuation protocols and communication <mark>procedures</mark> during critical situations...",
-      "has_thumbnail": true,
-      "document": {
-        "hash": "abc123def456789...",
-        "title": "Aviation Safety Manual",
-        "filename": "aviation-manual.pdf"
-      },
-      "thumbnail_url": "{base_url}/api/pdf-viewer/documents/abc123def456789/pages/15/thumbnail",
-      "page_url": "{base_url}/api/pdf-viewer/documents/abc123def456789/pages/15",
-      "created_at": "2024-08-22T10:31:00.000000Z",
-      "updated_at": "2024-08-22T10:32:00.000000Z"
-    }
-  ],
-  "meta": {
-    "current_page": 1,
-    "per_page": 10,
-    "total": 5,
-    "last_page": 1,
-    "search_time_ms": 12
-  }
-}
-```
-
-### Get Search Suggestions
-
-Get autocomplete suggestions for search queries based on indexed content.
-
-**Endpoint:** `GET /search/suggestions`
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `q` | String | Yes | - | Partial search term (minimum 2 characters) |
-| `limit` | Integer | No | 10 | Maximum number of suggestions (max 20) |
-
-**Example Request:**
-```bash
-curl -X GET \
-  '{base_url}/api/pdf-viewer/search/suggestions?q=aviat&limit=10' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
-
-**Response (200):**
-```json
-{
-  "suggestions": [
-    {
-      "term": "aviation",
-      "frequency": 156,
-      "category": "keyword"
-    },
-    {
-      "term": "aviation safety",
-      "frequency": 89,
-      "category": "phrase"
-    },
-    {
-      "term": "aviation procedures",
-      "frequency": 67,
-      "category": "phrase"
-    },
-    {
-      "term": "aviation manual",
-      "frequency": 45,
-      "category": "document"
+      "id": "uuid",
+      "title": "Chapter 1: Introduction",
+      "level": 0,
+      "destination_page": 1,
+      "destination_type": "page",
+      "destination_name": null,
+      "children": [
+        {
+          "id": "uuid",
+          "title": "1.1 Overview",
+          "level": 1,
+          "destination_page": 3,
+          "children": []
+        }
+      ]
     }
   ]
 }
@@ -591,250 +58,280 @@ curl -X GET \
 
 ---
 
-## Error Responses
+## Links Endpoints
 
-### Validation Errors (422)
+### GET /documents/{document_hash}/links
 
+Retrieves link statistics for the entire document.
+
+**Response:**
 ```json
 {
-  "message": "The given data was invalid.",
-  "errors": {
-    "file": [
-      "The file field is required.",
-      "The file must be a PDF document."
-    ],
-    "title": [
-      "The title must not be greater than 255 characters."
-    ],
-    "metadata.author": [
-      "The metadata.author must not be greater than 255 characters."
-    ]
-  }
-}
-```
-
-### Not Found (404)
-
-```json
-{
-  "message": "Document not found or access denied."
-}
-```
-
-### Unauthorized (401)
-
-```json
-{
-  "message": "Unauthenticated."
-}
-```
-
-### Server Error (500)
-
-```json
-{
-  "message": "An error occurred while processing your request.",
-  "error_id": "error-uuid-for-tracking"
-}
-```
-
----
-
-## Rate Limiting
-
-The API implements rate limiting to ensure fair usage:
-
-- **Document Upload**: 10 requests per minute per user
-- **Search Operations**: 60 requests per minute per user
-- **General API**: 100 requests per minute per user
-
-Rate limit headers are included in all responses:
-
-```http
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 59
-X-RateLimit-Reset: 1692707400
-```
-
----
-
-## Pagination
-
-All list endpoints support pagination using the following query parameters:
-
-- `page`: Page number (default: 1)
-- `per_page`: Items per page (default varies by endpoint, maximum limits apply)
-
-Pagination metadata is included in the `meta` object:
-
-```json
-{
-  "meta": {
-    "current_page": 1,
-    "per_page": 10,
-    "total": 150,
-    "last_page": 15,
-    "from": 1,
-    "to": 10
-  }
-}
-```
-
----
-
-## Webhooks (Optional)
-
-The package supports optional webhook notifications for document processing events:
-
-### Webhook Events
-
-- `document.uploaded` - Document successfully uploaded
-- `document.processing.started` - Processing started
-- `document.processing.completed` - Processing completed successfully
-- `document.processing.failed` - Processing failed
-- `document.page.completed` - Individual page processing completed
-
-### Webhook Payload Example
-
-```json
-{
-  "event": "document.processing.completed",
-  "timestamp": "2024-08-22T11:00:00.000000Z",
   "data": {
-    "document_hash": "abc123def456789...",
-    "status": "completed",
-    "processing_time_seconds": 900,
-    "total_pages": 150,
-    "completed_pages": 150,
-    "failed_pages": 0
+    "total_links": 45,
+    "internal_links": 30,
+    "external_links": 15,
+    "pages_with_links": 12,
+    "links_by_page": {
+      "1": 5,
+      "3": 8,
+      "10": 12
+    }
   }
+}
+```
+
+### GET /documents/{document_hash}/pages/{page_number}/links
+
+Retrieves all links for a specific page with coordinates.
+
+**Response:**
+```json
+{
+  "data": [
+    {
+      "id": "uuid",
+      "type": "internal",
+      "source_page": 1,
+      "destination_page": 25,
+      "destination_url": null,
+      "link_text": "See Chapter 3",
+      "absolute_coordinates": {
+        "x": 72.0,
+        "y": 150.5,
+        "width": 120.0,
+        "height": 14.0
+      },
+      "normalized_coordinates": {
+        "x_percent": 10.0,
+        "y_percent": 18.5,
+        "width_percent": 16.67,
+        "height_percent": 1.72
+      }
+    }
+  ]
 }
 ```
 
 ---
 
-## SDKs and Integration Examples
+## Code Examples
 
-### JavaScript/Node.js Example
+### JavaScript/TypeScript (Fetch API)
 
-```javascript
-class PdfViewerClient {
-  constructor(baseUrl, authToken) {
-    this.baseUrl = baseUrl;
-    this.authToken = authToken;
-  }
+```typescript
+interface OutlineEntry {
+  id: string;
+  title: string;
+  level: number;
+  destination_page: number | null;
+  destination_type: 'page' | 'named';
+  destination_name: string | null;
+  children: OutlineEntry[];
+}
 
-  async uploadDocument(file, metadata = {}) {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    Object.entries(metadata).forEach(([key, value]) => {
-      if (typeof value === 'object') {
-        Object.entries(value).forEach(([subKey, subValue]) => {
-          formData.append(`${key}[${subKey}]`, subValue);
-        });
-      } else {
-        formData.append(key, value);
-      }
-    });
+interface PageLink {
+  id: string;
+  type: 'internal' | 'external' | 'unknown';
+  source_page: number;
+  destination_page: number | null;
+  destination_url: string | null;
+  link_text: string | null;
+  absolute_coordinates: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  normalized_coordinates: {
+    x_percent: number;
+    y_percent: number;
+    width_percent: number;
+    height_percent: number;
+  };
+}
 
-    const response = await fetch(`${this.baseUrl}/documents`, {
-      method: 'POST',
+// Fetch document outline
+async function getDocumentOutline(documentHash: string): Promise<OutlineEntry[]> {
+  const response = await fetch(
+    `/api/pdf-viewer/documents/${documentHash}/outline`,
+    {
       headers: {
-        'Authorization': `Bearer ${this.authToken}`,
-        'Accept': 'application/json'
+        'Authorization': `Bearer ${getToken()}`,
+        'Accept': 'application/json',
       },
-      body: formData
-    });
+    }
+  );
 
-    return await response.json();
+  if (!response.ok) {
+    throw new Error(`Failed to fetch outline: ${response.statusText}`);
   }
 
-  async searchDocuments(query, filters = {}) {
-    const params = new URLSearchParams({ q: query, ...filters });
-    const response = await fetch(`${this.baseUrl}/search/documents?${params}`, {
+  const { data } = await response.json();
+  return data;
+}
+
+// Fetch links for a specific page
+async function getPageLinks(documentHash: string, pageNumber: number): Promise<PageLink[]> {
+  const response = await fetch(
+    `/api/pdf-viewer/documents/${documentHash}/pages/${pageNumber}/links`,
+    {
       headers: {
-        'Authorization': `Bearer ${this.authToken}`,
-        'Accept': 'application/json'
+        'Authorization': `Bearer ${getToken()}`,
+        'Accept': 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch links: ${response.statusText}`);
+  }
+
+  const { data } = await response.json();
+  return data;
+}
+
+// Render clickable link overlays on a page
+function renderLinkOverlays(
+  container: HTMLElement,
+  links: PageLink[],
+  onNavigate: (page: number) => void
+): void {
+  links.forEach((link) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'pdf-link-overlay';
+    overlay.style.cssText = `
+      position: absolute;
+      left: ${link.normalized_coordinates.x_percent}%;
+      top: ${link.normalized_coordinates.y_percent}%;
+      width: ${link.normalized_coordinates.width_percent}%;
+      height: ${link.normalized_coordinates.height_percent}%;
+      cursor: pointer;
+      background: rgba(0, 0, 255, 0.1);
+    `;
+
+    overlay.addEventListener('click', () => {
+      if (link.type === 'internal' && link.destination_page) {
+        onNavigate(link.destination_page);
+      } else if (link.type === 'external' && link.destination_url) {
+        window.open(link.destination_url, '_blank', 'noopener,noreferrer');
       }
     });
 
-    return await response.json();
-  }
+    container.appendChild(overlay);
+  });
 }
 ```
 
-### PHP Example
+### PHP (Laravel HTTP Client)
 
 ```php
+<?php
+
+use Illuminate\Support\Facades\Http;
+
 class PdfViewerClient
 {
     private string $baseUrl;
-    private string $authToken;
+    private string $token;
 
-    public function __construct(string $baseUrl, string $authToken)
+    public function __construct(string $baseUrl, string $token)
     {
         $this->baseUrl = rtrim($baseUrl, '/');
-        $this->authToken = $authToken;
+        $this->token = $token;
     }
 
-    public function uploadDocument($filePath, array $metadata = []): array
+    public function getOutline(string $documentHash): array
     {
-        $curl = curl_init();
-        
-        $postFields = [
-            'file' => new CURLFile($filePath, 'application/pdf')
-        ];
-        
-        foreach ($metadata as $key => $value) {
-            if (is_array($value)) {
-                foreach ($value as $subKey => $subValue) {
-                    $postFields["{$key}[{$subKey}]"] = $subValue;
-                }
-            } else {
-                $postFields[$key] = $value;
-            }
+        $response = Http::withToken($this->token)
+            ->acceptJson()
+            ->get("{$this->baseUrl}/documents/{$documentHash}/outline");
+
+        if ($response->failed()) {
+            throw new \Exception("Failed to fetch outline: {$response->status()}");
         }
 
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "{$this->baseUrl}/documents",
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $postFields,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                "Authorization: Bearer {$this->authToken}",
-                "Accept: application/json"
-            ]
-        ]);
-
-        $response = curl_exec($curl);
-        curl_close($curl);
-
-        return json_decode($response, true);
+        return $response->json('data', []);
     }
 
-    public function searchDocuments(string $query, array $filters = []): array
+    public function getPageLinks(string $documentHash, int $pageNumber): array
     {
-        $params = http_build_query(array_merge(['q' => $query], $filters));
-        
-        $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "{$this->baseUrl}/search/documents?{$params}",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER => [
-                "Authorization: Bearer {$this->authToken}",
-                "Accept: application/json"
-            ]
-        ]);
+        $response = Http::withToken($this->token)
+            ->acceptJson()
+            ->get("{$this->baseUrl}/documents/{$documentHash}/pages/{$pageNumber}/links");
 
-        $response = curl_exec($curl);
-        curl_close($curl);
+        if ($response->failed()) {
+            throw new \Exception("Failed to fetch page links: {$response->status()}");
+        }
 
-        return json_decode($response, true);
+        return $response->json('data', []);
     }
+}
+```
+
+### Python (requests)
+
+```python
+import requests
+from typing import List, Dict, Optional
+
+class PdfViewerClient:
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url.rstrip('/')
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/json',
+        })
+
+    def get_outline(self, document_hash: str) -> List[Dict]:
+        response = self.session.get(
+            f'{self.base_url}/documents/{document_hash}/outline'
+        )
+        response.raise_for_status()
+        return response.json().get('data', [])
+
+    def get_page_links(self, document_hash: str, page_number: int) -> List[Dict]:
+        response = self.session.get(
+            f'{self.base_url}/documents/{document_hash}/pages/{page_number}/links'
+        )
+        response.raise_for_status()
+        return response.json().get('data', [])
+```
+
+---
+
+## Error Handling
+
+### HTTP Status Codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | Success |
+| 401 | Unauthorized - Invalid or missing token |
+| 404 | Document not found |
+| 422 | Validation error |
+| 500 | Server error |
+
+### Handling Feature Toggles
+
+When TOC or link extraction is disabled, endpoints return empty arrays:
+
+```javascript
+const doc = await fetch(`/api/pdf-viewer/documents/${hash}`);
+const { data } = await doc.json();
+
+if (data.has_outline) {
+  // Show TOC panel
+}
+
+if (data.has_links) {
+  // Enable link overlay rendering
 }
 ```
 
 ---
 
-This documentation covers all available API endpoints and provides comprehensive examples for integration. For additional support or questions, please refer to the main package documentation or create an issue on the project repository.
+## OpenAPI Specification
+
+The complete OpenAPI 3.1 specification is available at `docs/openapi.yaml`.
