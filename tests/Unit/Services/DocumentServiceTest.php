@@ -2,7 +2,6 @@
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Mockery;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Exceptions\DocumentNotFoundException;

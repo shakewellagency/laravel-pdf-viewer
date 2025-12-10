@@ -2,7 +2,6 @@
 
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
-use Mockery;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Jobs\ExtractPageJob;
 use Shakewellagency\LaravelPdfViewer\Jobs\ProcessPageTextJob;

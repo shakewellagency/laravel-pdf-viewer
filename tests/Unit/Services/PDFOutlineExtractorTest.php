@@ -1,6 +1,5 @@
 <?php
 
-use Mockery;
 use Shakewellagency\LaravelPdfViewer\Services\PDFOutlineExtractor;
 
 beforeEach(function () {

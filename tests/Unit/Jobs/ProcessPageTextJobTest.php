@@ -2,7 +2,6 @@
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Mockery;
 use Shakewellagency\LaravelPdfViewer\Contracts\CacheServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\SearchServiceInterface;

@@ -3,7 +3,6 @@
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
-use Mockery;
 use Shakewellagency\LaravelPdfViewer\Contracts\DocumentProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Contracts\PageProcessingServiceInterface;
 use Shakewellagency\LaravelPdfViewer\Jobs\ExtractPageJob;
