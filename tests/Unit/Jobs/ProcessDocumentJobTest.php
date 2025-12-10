@@ -63,7 +63,7 @@ it('processes document successfully', function () {
     $this->document->refresh();
     expect($this->document->processing_progress)->not->toBeNull();
     expect($this->document->processing_progress['stage'])->toBe('pages_dispatched');
-    expect($this->document->processing_progress['progress'])->toBe(50);
+    expect($this->document->processing_progress['progress'])->toBe(60);
 });
 
 it('handles invalid pdf file', function () {
@@ -105,7 +105,7 @@ it('updates processing progress stages', function () {
     // Check that progress was updated multiple times
     $progress = $this->document->processing_progress;
     expect($progress['stage'])->toBe('pages_dispatched');
-    expect($progress['progress'])->toBe(50);
+    expect($progress['progress'])->toBe(60);
 });
 
 it('handles document with no pages', function () {

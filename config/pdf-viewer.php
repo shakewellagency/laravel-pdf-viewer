@@ -120,6 +120,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Extraction Configuration (TOC & Links)
+    |--------------------------------------------------------------------------
+    |
+    | Configure automatic extraction of Table of Contents (TOC/Outline) and
+    | links during document processing.
+    |
+    */
+    'extraction' => [
+        // Enable/disable outline (TOC) extraction during processing
+        'outline_enabled' => env('PDF_VIEWER_OUTLINE_ENABLED', true),
+
+        // Enable/disable link extraction during processing
+        'links_enabled' => env('PDF_VIEWER_LINKS_ENABLED', true),
+
+        // Maximum pages to process for link extraction (0 = no limit)
+        'max_pages_for_links' => env('PDF_VIEWER_MAX_PAGES_FOR_LINKS', 0),
+
+        // Batch size for link insertion (performance optimization)
+        'link_batch_size' => env('PDF_VIEWER_LINK_BATCH_SIZE', 100),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Page Extraction Configuration
     |--------------------------------------------------------------------------
     */
