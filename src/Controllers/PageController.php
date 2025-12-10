@@ -181,21 +181,38 @@ class PageController extends Controller
         }
 
         try {
-            // Get links for this specific page
+            // Try to get cached page links first
+            $cachedLinks = $this->cacheService->getCachedPageLinks($documentHash, $pageNumber);
+
+            if ($cachedLinks !== null) {
+                return response()->json($cachedLinks);
+            }
+
+            // Get links for this specific page with optimized query
             $links = PdfDocumentLink::where('pdf_document_id', $document->id)
                 ->where('source_page', $pageNumber)
+                ->orderBy('id')
                 ->get();
 
-            return response()->json([
+            $totalLinks = $links->count();
+            $internalLinks = $links->where('type', 'internal')->count();
+            $externalLinks = $links->where('type', 'external')->count();
+
+            $response = [
                 'data' => LinkResource::collection($links),
                 'meta' => [
                     'document_hash' => $document->hash,
                     'page_number' => $pageNumber,
-                    'total_links' => $links->count(),
-                    'internal_links' => $links->where('type', 'internal')->count(),
-                    'external_links' => $links->where('type', 'external')->count(),
+                    'total_links' => $totalLinks,
+                    'internal_links' => $internalLinks,
+                    'external_links' => $externalLinks,
                 ],
-            ]);
+            ];
+
+            // Cache the response (24 hour TTL - link data is static)
+            $this->cacheService->cachePageLinks($documentHash, $pageNumber, $response);
+
+            return response()->json($response);
 
         } catch (\Exception $e) {
             return response()->json([

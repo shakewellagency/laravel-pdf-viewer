@@ -96,11 +96,15 @@ return [
             'document_metadata' => env('PDF_VIEWER_CACHE_DOCUMENT_TTL', 3600), // 1 hour
             'page_content' => env('PDF_VIEWER_CACHE_PAGE_TTL', 7200), // 2 hours
             'search_results' => env('PDF_VIEWER_CACHE_SEARCH_TTL', 1800), // 30 minutes
+            'outline' => env('PDF_VIEWER_CACHE_OUTLINE_TTL', 86400), // 24 hours (static data)
+            'links' => env('PDF_VIEWER_CACHE_LINKS_TTL', 86400), // 24 hours (static data)
         ],
         'tags' => [
             'documents' => 'pdf_viewer_documents',
             'pages' => 'pdf_viewer_pages',
             'search' => 'pdf_viewer_search',
+            'outline' => 'pdf_viewer_outline',
+            'links' => 'pdf_viewer_links',
         ],
     ],
 

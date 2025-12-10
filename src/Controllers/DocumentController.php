@@ -717,28 +717,39 @@ class DocumentController extends Controller
         }
 
         try {
-            // Get hierarchical outline tree
-            $outlineTree = PdfDocumentOutline::getTreeForDocument($document->id);
+            // Try to get cached outline first
+            $cachedOutline = $this->cacheService->getCachedOutline($documentHash);
 
-            // Check if document has outline
-            $hasOutline = !empty($outlineTree);
+            if ($cachedOutline !== null) {
+                return response()->json($cachedOutline);
+            }
 
-            // Get outline entries with children for resources
+            // Get outline entries with eager-loaded descendants (single query with recursion)
             $outlineEntries = PdfDocumentOutline::where('pdf_document_id', $document->id)
                 ->whereNull('parent_id')
                 ->with('descendants')
                 ->orderBy('order_index')
                 ->get();
 
-            return response()->json([
+            // Get counts efficiently with single queries
+            $totalEntries = PdfDocumentOutline::where('pdf_document_id', $document->id)->count();
+            $maxDepth = PdfDocumentOutline::where('pdf_document_id', $document->id)->max('level') ?? 0;
+            $hasOutline = $totalEntries > 0;
+
+            $response = [
                 'data' => OutlineResource::collection($outlineEntries),
                 'meta' => [
                     'document_hash' => $document->hash,
                     'has_outline' => $hasOutline,
-                    'total_entries' => PdfDocumentOutline::where('pdf_document_id', $document->id)->count(),
-                    'max_depth' => PdfDocumentOutline::where('pdf_document_id', $document->id)->max('level') ?? 0,
+                    'total_entries' => $totalEntries,
+                    'max_depth' => $maxDepth,
                 ],
-            ]);
+            ];
+
+            // Cache the response (24 hour TTL - outline data is static)
+            $this->cacheService->cacheOutline($documentHash, $response);
+
+            return response()->json($response);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -760,12 +771,30 @@ class DocumentController extends Controller
         }
 
         try {
-            // Get link statistics
-            $allLinks = PdfDocumentLink::where('pdf_document_id', $document->id)->get();
+            // Try to get cached links first
+            $cachedLinks = $this->cacheService->getCachedLinks($documentHash);
 
-            $totalLinks = $allLinks->count();
-            $internalLinks = $allLinks->where('type', 'internal')->count();
-            $externalLinks = $allLinks->where('type', 'external')->count();
+            if ($cachedLinks !== null) {
+                return response()->json($cachedLinks);
+            }
+
+            // Get link statistics efficiently with optimized queries
+            // Use selectRaw for aggregates in a single query
+            $stats = PdfDocumentLink::where('pdf_document_id', $document->id)
+                ->selectRaw('COUNT(*) as total')
+                ->selectRaw("SUM(CASE WHEN type = 'internal' THEN 1 ELSE 0 END) as internal")
+                ->selectRaw("SUM(CASE WHEN type = 'external' THEN 1 ELSE 0 END) as external")
+                ->first();
+
+            $totalLinks = (int) $stats->total;
+            $internalLinks = (int) $stats->internal;
+            $externalLinks = (int) $stats->external;
+
+            // Get all links with single query for grouping
+            $allLinks = PdfDocumentLink::where('pdf_document_id', $document->id)
+                ->orderBy('source_page')
+                ->orderBy('id')
+                ->get();
 
             // Group links by source page
             $linksByPage = $allLinks->groupBy('source_page')->map(function ($pageLinks, $pageNumber) {
@@ -778,7 +807,7 @@ class DocumentController extends Controller
                 ];
             })->values();
 
-            return response()->json([
+            $response = [
                 'data' => [
                     'summary' => [
                         'total_links' => $totalLinks,
@@ -792,7 +821,12 @@ class DocumentController extends Controller
                     'document_hash' => $document->hash,
                     'has_links' => $totalLinks > 0,
                 ],
-            ]);
+            ];
+
+            // Cache the response (24 hour TTL - link data is static)
+            $this->cacheService->cacheLinks($documentHash, $response);
+
+            return response()->json($response);
 
         } catch (\Exception $e) {
             return response()->json([

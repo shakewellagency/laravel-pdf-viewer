@@ -38,6 +38,36 @@ interface CacheServiceInterface
     public function getCachedSearchResults(string $queryHash): ?array;
 
     /**
+     * Cache document outline (TOC)
+     */
+    public function cacheOutline(string $documentHash, array $outline, ?int $ttl = null): bool;
+
+    /**
+     * Get cached document outline
+     */
+    public function getCachedOutline(string $documentHash): ?array;
+
+    /**
+     * Cache document links
+     */
+    public function cacheLinks(string $documentHash, array $links, ?int $ttl = null): bool;
+
+    /**
+     * Get cached document links
+     */
+    public function getCachedLinks(string $documentHash): ?array;
+
+    /**
+     * Cache page links
+     */
+    public function cachePageLinks(string $documentHash, int $pageNumber, array $links, ?int $ttl = null): bool;
+
+    /**
+     * Get cached page links
+     */
+    public function getCachedPageLinks(string $documentHash, int $pageNumber): ?array;
+
+    /**
      * Invalidate document cache
      */
     public function invalidateDocumentCache(string $documentHash): bool;
