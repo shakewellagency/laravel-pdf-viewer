@@ -259,3 +259,169 @@ it('casts are applied correctly', function () {
     expect($outline->destination_page)->toBeInt();
     expect($outline->order_index)->toBeInt();
 });
+
+// ========== Edge Case Tests ==========
+
+it('handles very deep nesting (5+ levels)', function () {
+    $levels = [];
+    $previousLevel = null;
+
+    // Create 6 levels of nesting (0-5)
+    for ($i = 0; $i <= 5; $i++) {
+        $levels[$i] = PdfDocumentOutline::create([
+            'pdf_document_id' => $this->document->id,
+            'parent_id' => $previousLevel?->id,
+            'title' => "Level $i",
+            'level' => $i,
+            'destination_page' => $i + 1,
+            'order_index' => 0,
+        ]);
+        $previousLevel = $levels[$i];
+    }
+
+    // Verify the deepest level can access its path
+    $deepestLevel = $levels[5];
+    $path = $deepestLevel->title_path;
+
+    expect($path)->toHaveCount(6);
+    expect($path[0])->toBe('Level 0');
+    expect($path[5])->toBe('Level 5');
+
+    // Verify tree structure builds correctly
+    $tree = PdfDocumentOutline::getTreeForDocument($this->document->id);
+
+    expect($tree)->toHaveCount(1);
+    expect($tree[0]['title'])->toBe('Level 0');
+    expect($tree[0]['children'])->toHaveCount(1);
+
+    // Navigate through all levels
+    $current = $tree[0];
+    for ($i = 1; $i <= 5; $i++) {
+        expect($current['children'][0]['title'])->toBe("Level $i");
+        $current = $current['children'][0];
+    }
+});
+
+it('handles document with no outline entries', function () {
+    // Document has no outlines
+    $tree = PdfDocumentOutline::getTreeForDocument($this->document->id);
+
+    expect($tree)->toBeArray();
+    expect($tree)->toBeEmpty();
+});
+
+it('handles multiple root level entries', function () {
+    // Create 5 root level entries
+    for ($i = 0; $i < 5; $i++) {
+        PdfDocumentOutline::create([
+            'pdf_document_id' => $this->document->id,
+            'title' => "Chapter $i",
+            'level' => 0,
+            'destination_page' => $i * 10 + 1,
+            'order_index' => $i,
+        ]);
+    }
+
+    $tree = PdfDocumentOutline::getTreeForDocument($this->document->id);
+
+    expect($tree)->toHaveCount(5);
+    expect($tree[0]['title'])->toBe('Chapter 0');
+    expect($tree[4]['title'])->toBe('Chapter 4');
+});
+
+it('handles complex mixed hierarchy', function () {
+    // Create a complex structure:
+    // Chapter 1 -> Section 1.1, Section 1.2 -> Subsection 1.2.1
+    // Chapter 2 -> Section 2.1
+
+    $ch1 = PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'title' => 'Chapter 1',
+        'level' => 0,
+        'destination_page' => 1,
+        'order_index' => 0,
+    ]);
+
+    PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'parent_id' => $ch1->id,
+        'title' => 'Section 1.1',
+        'level' => 1,
+        'destination_page' => 5,
+        'order_index' => 0,
+    ]);
+
+    $sec12 = PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'parent_id' => $ch1->id,
+        'title' => 'Section 1.2',
+        'level' => 1,
+        'destination_page' => 10,
+        'order_index' => 1,
+    ]);
+
+    PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'parent_id' => $sec12->id,
+        'title' => 'Subsection 1.2.1',
+        'level' => 2,
+        'destination_page' => 12,
+        'order_index' => 0,
+    ]);
+
+    $ch2 = PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'title' => 'Chapter 2',
+        'level' => 0,
+        'destination_page' => 20,
+        'order_index' => 1,
+    ]);
+
+    PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'parent_id' => $ch2->id,
+        'title' => 'Section 2.1',
+        'level' => 1,
+        'destination_page' => 25,
+        'order_index' => 0,
+    ]);
+
+    $tree = PdfDocumentOutline::getTreeForDocument($this->document->id);
+
+    expect($tree)->toHaveCount(2);
+    expect($tree[0]['children'])->toHaveCount(2);
+    expect($tree[0]['children'][1]['children'])->toHaveCount(1);
+    expect($tree[0]['children'][1]['children'][0]['title'])->toBe('Subsection 1.2.1');
+    expect($tree[1]['children'])->toHaveCount(1);
+});
+
+it('handles special characters in title', function () {
+    $specialTitle = "Chapter & Section <test> \"quotes\" 'apostrophes' </end>";
+
+    $outline = PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'title' => $specialTitle,
+        'level' => 0,
+        'destination_page' => 1,
+        'order_index' => 0,
+    ]);
+
+    expect($outline->title)->toBe($specialTitle);
+
+    $tree = PdfDocumentOutline::getTreeForDocument($this->document->id);
+    expect($tree[0]['title'])->toBe($specialTitle);
+});
+
+it('handles unicode characters in title', function () {
+    $unicodeTitle = "章节 1: Введение - المقدمة - 日本語タイトル";
+
+    $outline = PdfDocumentOutline::create([
+        'pdf_document_id' => $this->document->id,
+        'title' => $unicodeTitle,
+        'level' => 0,
+        'destination_page' => 1,
+        'order_index' => 0,
+    ]);
+
+    expect($outline->title)->toBe($unicodeTitle);
+});

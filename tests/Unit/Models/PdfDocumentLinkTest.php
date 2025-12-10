@@ -249,3 +249,161 @@ it('casts are applied correctly', function () {
     expect($link->source_rect_x)->toBeFloat();
     expect($link->source_rect_y)->toBeFloat();
 });
+
+// ========== Edge Case Tests ==========
+
+it('handles many links per document (500+)', function () {
+    // Create 500 links
+    $links = [];
+    for ($i = 0; $i < 500; $i++) {
+        $links[] = [
+            'id' => (string) \Illuminate\Support\Str::uuid(),
+            'pdf_document_id' => $this->document->id,
+            'source_page' => ($i % 10) + 1,
+            'type' => $i % 2 === 0 ? PdfDocumentLink::TYPE_INTERNAL : PdfDocumentLink::TYPE_EXTERNAL,
+            'destination_page' => $i % 2 === 0 ? ($i % 50) + 1 : null,
+            'destination_url' => $i % 2 === 1 ? "https://example.com/link-$i" : null,
+            'source_rect_x' => $i * 10.0,
+            'source_rect_y' => $i * 5.0,
+            'source_rect_width' => 100.0,
+            'source_rect_height' => 20.0,
+            'created_at' => now(),
+        ];
+    }
+
+    // Batch insert
+    PdfDocumentLink::insert($links);
+
+    $totalLinks = PdfDocumentLink::where('pdf_document_id', $this->document->id)->count();
+    expect($totalLinks)->toBe(500);
+
+    // Verify grouped by page works with many links
+    $grouped = PdfDocumentLink::getGroupedByPageForDocument($this->document->id);
+    expect($grouped)->toHaveCount(10);
+
+    // Each page should have 50 links
+    foreach ($grouped as $pageNumber => $pageLinks) {
+        expect($pageLinks)->toHaveCount(50);
+    }
+});
+
+it('handles document with no links', function () {
+    // Document has no links
+    $grouped = PdfDocumentLink::getGroupedByPageForDocument($this->document->id);
+
+    expect($grouped)->toBeArray();
+    expect($grouped)->toBeEmpty();
+});
+
+it('handles links with zero coordinates', function () {
+    $link = PdfDocumentLink::create([
+        'pdf_document_id' => $this->document->id,
+        'source_page' => 1,
+        'type' => PdfDocumentLink::TYPE_INTERNAL,
+        'destination_page' => 5,
+        'source_rect_x' => 0.0,
+        'source_rect_y' => 0.0,
+        'source_rect_width' => 0.0,
+        'source_rect_height' => 0.0,
+        'coord_x_percent' => 0.0,
+        'coord_y_percent' => 0.0,
+        'coord_width_percent' => 0.0,
+        'coord_height_percent' => 0.0,
+    ]);
+
+    $coords = $link->absolute_coordinates;
+    expect($coords['x'])->toBe(0.0);
+    expect($coords['y'])->toBe(0.0);
+    expect($coords['width'])->toBe(0.0);
+    expect($coords['height'])->toBe(0.0);
+});
+
+it('handles very long destination URLs', function () {
+    $longUrl = 'https://example.com/' . str_repeat('a', 1000);
+
+    $link = PdfDocumentLink::create([
+        'pdf_document_id' => $this->document->id,
+        'source_page' => 1,
+        'type' => PdfDocumentLink::TYPE_EXTERNAL,
+        'destination_url' => $longUrl,
+    ]);
+
+    expect($link->destination_url)->toBe($longUrl);
+});
+
+it('handles links spanning multiple pages to same destination', function () {
+    // Create links from pages 1, 2, 3 all pointing to page 10
+    for ($page = 1; $page <= 3; $page++) {
+        PdfDocumentLink::create([
+            'pdf_document_id' => $this->document->id,
+            'source_page' => $page,
+            'type' => PdfDocumentLink::TYPE_INTERNAL,
+            'destination_page' => 10,
+        ]);
+    }
+
+    $linksToPage10 = PdfDocumentLink::where('pdf_document_id', $this->document->id)
+        ->pointingToPage(10)
+        ->get();
+
+    expect($linksToPage10)->toHaveCount(3);
+});
+
+it('handles mixed internal and external links on same page', function () {
+    // Create 3 internal and 2 external links on page 1
+    for ($i = 0; $i < 3; $i++) {
+        PdfDocumentLink::create([
+            'pdf_document_id' => $this->document->id,
+            'source_page' => 1,
+            'type' => PdfDocumentLink::TYPE_INTERNAL,
+            'destination_page' => ($i + 1) * 5,
+        ]);
+    }
+
+    for ($i = 0; $i < 2; $i++) {
+        PdfDocumentLink::create([
+            'pdf_document_id' => $this->document->id,
+            'source_page' => 1,
+            'type' => PdfDocumentLink::TYPE_EXTERNAL,
+            'destination_url' => "https://example-$i.com",
+        ]);
+    }
+
+    $page1Links = PdfDocumentLink::where('pdf_document_id', $this->document->id)
+        ->forPage(1)
+        ->get();
+
+    expect($page1Links)->toHaveCount(5);
+
+    $internalCount = $page1Links->where('type', PdfDocumentLink::TYPE_INTERNAL)->count();
+    $externalCount = $page1Links->where('type', PdfDocumentLink::TYPE_EXTERNAL)->count();
+
+    expect($internalCount)->toBe(3);
+    expect($externalCount)->toBe(2);
+});
+
+it('handles special characters in destination URL', function () {
+    $specialUrl = 'https://example.com/path?query=hello&foo=bar#section-1';
+
+    $link = PdfDocumentLink::create([
+        'pdf_document_id' => $this->document->id,
+        'source_page' => 1,
+        'type' => PdfDocumentLink::TYPE_EXTERNAL,
+        'destination_url' => $specialUrl,
+    ]);
+
+    expect($link->destination_url)->toBe($specialUrl);
+});
+
+it('handles unicode in destination URL', function () {
+    $unicodeUrl = 'https://example.com/путь/页面';
+
+    $link = PdfDocumentLink::create([
+        'pdf_document_id' => $this->document->id,
+        'source_page' => 1,
+        'type' => PdfDocumentLink::TYPE_EXTERNAL,
+        'destination_url' => $unicodeUrl,
+    ]);
+
+    expect($link->destination_url)->toBe($unicodeUrl);
+});

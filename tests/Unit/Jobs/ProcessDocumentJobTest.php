@@ -257,3 +257,151 @@ it('dispatches extract page jobs in correct order', function () {
         });
     }
 });
+
+// ========== Outline and Link Extraction Feature Toggle Tests ==========
+
+it('skips outline extraction when disabled in config', function () {
+    Bus::fake();
+
+    config(['pdf-viewer.extraction.outline_enabled' => false]);
+    config(['pdf-viewer.extraction.links_enabled' => false]); // Disable both to simplify test
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Job completes successfully - extraction was skipped
+    $this->document->refresh();
+    expect($this->document->processing_progress['stage'])->toBe('pages_dispatched');
+});
+
+it('skips link extraction when disabled in config', function () {
+    Bus::fake();
+
+    config(['pdf-viewer.extraction.outline_enabled' => false]); // Disable both to simplify test
+    config(['pdf-viewer.extraction.links_enabled' => false]);
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Job completes successfully - extraction was skipped
+    $this->document->refresh();
+    expect($this->document->processing_progress['stage'])->toBe('pages_dispatched');
+});
+
+it('attempts outline extraction when enabled in config', function () {
+    Bus::fake();
+    Log::spy();
+
+    config(['pdf-viewer.extraction.outline_enabled' => true]);
+    config(['pdf-viewer.storage.disk' => 'local']);
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Should log that outline extraction was attempted
+    Log::shouldHaveReceived('info')
+        ->with('Extracting document outline', [
+            'document_hash' => $this->document->hash,
+        ])
+        ->once();
+});
+
+it('attempts link extraction when enabled in config', function () {
+    Bus::fake();
+    Log::spy();
+
+    config(['pdf-viewer.extraction.links_enabled' => true]);
+    config(['pdf-viewer.storage.disk' => 'local']);
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Should log that link extraction was attempted
+    Log::shouldHaveReceived('info')
+        ->with('Extracting document links', [
+            'document_hash' => $this->document->hash,
+        ])
+        ->once();
+});
+
+it('handles missing file gracefully during outline extraction', function () {
+    Bus::fake();
+    Log::spy();
+
+    config(['pdf-viewer.extraction.outline_enabled' => true]);
+    config(['pdf-viewer.storage.disk' => 'local']);
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    // File doesn't exist
+    $this->document->update(['file_path' => 'nonexistent/path.pdf']);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Should log warning about missing file, but job should complete
+    Log::shouldHaveReceived('warning')
+        ->with('Could not get local file path for outline extraction', Mockery::type('array'))
+        ->once();
+
+    // Job should still complete successfully
+    $this->document->refresh();
+    expect($this->document->processing_progress['stage'])->toBe('pages_dispatched');
+});
+
+it('handles missing file gracefully during link extraction', function () {
+    Bus::fake();
+    Log::spy();
+
+    config(['pdf-viewer.extraction.links_enabled' => true]);
+    config(['pdf-viewer.storage.disk' => 'local']);
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    // File doesn't exist
+    $this->document->update(['file_path' => 'nonexistent/path.pdf']);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Should log warning about missing file, but job should complete
+    Log::shouldHaveReceived('warning')
+        ->with('Could not get local file path for link extraction', Mockery::type('array'))
+        ->once();
+
+    // Job should still complete successfully
+    $this->document->refresh();
+    expect($this->document->processing_progress['stage'])->toBe('pages_dispatched');
+});
+
+it('both extractions can be disabled simultaneously', function () {
+    Bus::fake();
+
+    config(['pdf-viewer.extraction.outline_enabled' => false]);
+    config(['pdf-viewer.extraction.links_enabled' => false]);
+
+    $this->processingService->shouldReceive('validatePdf')->andReturn(true);
+    $this->pageService->shouldReceive('createPage')->andReturn($this->mockPage);
+
+    $job = new ProcessDocumentJob($this->document);
+    $job->handle($this->processingService, $this->pageService);
+
+    // Job should complete normally without extraction being attempted
+    $this->document->refresh();
+    expect($this->document->processing_progress['stage'])->toBe('pages_dispatched');
+    expect($this->document->processing_progress['progress'])->toBe(60);
+});
