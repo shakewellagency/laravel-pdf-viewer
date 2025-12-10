@@ -53,7 +53,7 @@ jobs:
           touch database/database.sqlite
 
       - name: Execute tests
-        run: vendor/bin/phpunit --coverage-text --coverage-clover=coverage.clover
+        run: vendor/bin/pest --coverage-text --coverage-clover=coverage.clover
 
       - name: Upload coverage to Codecov
         if: matrix.php == '8.2' && matrix.laravel == '11.0' && matrix.dependency-version == 'prefer-stable'
