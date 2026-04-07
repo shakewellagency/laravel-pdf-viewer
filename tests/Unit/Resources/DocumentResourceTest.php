@@ -37,6 +37,7 @@ class DocumentResourceTest extends TestCase
         $this->assertEquals('test.pdf', $result['filename']);
         $this->assertEquals(1024, $result['file_size']);
         $this->assertEquals('application/pdf', $result['mime_type']);
+        $this->assertEquals($document->file_path, $result['file_path']);
         $this->assertEquals(5, $result['page_count']);
         $this->assertEquals('completed', $result['status']);
         $this->assertTrue($result['is_searchable']);
