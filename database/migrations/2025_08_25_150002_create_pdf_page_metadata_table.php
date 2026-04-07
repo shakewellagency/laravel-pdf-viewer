@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('pdf_page_metadata')) {
+            return;
+        }
+
         Schema::create('pdf_page_metadata', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('pdf_document_page_id')->constrained('pdf_document_pages')->onDelete('cascade');
