@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('pdf_audit_compliance_flags')) {
+            return;
+        }
+
         Schema::create('pdf_audit_compliance_flags', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('pdf_extraction_audit_id')->constrained('pdf_extraction_audits')->onDelete('cascade');
@@ -18,8 +22,8 @@ return new class extends Migration
             $table->timestamps();
 
             // Indexes for performance
-            $table->index(['pdf_extraction_audit_id', 'compliance_type']);
-            $table->index(['compliance_type', 'is_compliant']);
+            $table->index(['pdf_extraction_audit_id', 'compliance_type'], 'audit_compliance_audit_id_type_idx');
+            $table->index(['compliance_type', 'is_compliant'], 'audit_compliance_type_compliant_idx');
         });
     }
 

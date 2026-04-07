@@ -21,7 +21,7 @@ return new class extends Migration
             $table->timestamps();
 
             // Indexes for performance
-            $table->index(['pdf_extraction_audit_id', 'severity']);
+            $table->index(['pdf_extraction_audit_id', 'severity'], 'audit_warnings_audit_id_severity_idx');
             $table->index(['warning_type', 'resolved']);
             $table->index(['severity', 'resolved']);
         });

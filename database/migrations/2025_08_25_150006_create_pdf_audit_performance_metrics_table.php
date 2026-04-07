@@ -18,8 +18,8 @@ return new class extends Migration
             $table->timestamps();
 
             // Indexes for performance
-            $table->index(['pdf_extraction_audit_id', 'metric_name']);
-            $table->index(['metric_name', 'recorded_at']);
+            $table->index(['pdf_extraction_audit_id', 'metric_name'], 'audit_perf_audit_id_metric_idx');
+            $table->index(['metric_name', 'recorded_at'], 'audit_perf_metric_recorded_idx');
         });
     }
 

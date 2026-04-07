@@ -17,7 +17,7 @@ return new class extends Migration
             $table->timestamps();
 
             // Indexes for performance
-            $table->unique(['pdf_extraction_audit_id', 'setting_key']);
+            $table->unique(['pdf_extraction_audit_id', 'setting_key'], 'audit_settings_audit_id_key_unique');
             $table->index(['setting_key']);
         });
     }
