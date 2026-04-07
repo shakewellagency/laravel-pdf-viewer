@@ -17,6 +17,7 @@ class DocumentResource extends JsonResource
             'file_size' => $this->file_size,
             'formatted_file_size' => $this->formatted_file_size,
             'mime_type' => $this->mime_type,
+            'file_path' => $this->file_path,
             'page_count' => $this->page_count,
             'status' => $this->status,
             'is_searchable' => $this->is_searchable,

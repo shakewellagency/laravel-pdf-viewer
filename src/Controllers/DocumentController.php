@@ -414,6 +414,7 @@ class DocumentController extends Controller
                 'data' => [
                     'document_hash' => $upload['document_hash'],
                     'upload_id' => $upload['upload_id'],
+                    'file_path' => $upload['file_path'],
                     'signed_urls' => $signedUrls,
                     'expires_in' => $upload['expires_in'],
                 ],
