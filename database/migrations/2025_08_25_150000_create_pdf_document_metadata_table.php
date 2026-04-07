@@ -19,7 +19,7 @@ return new class extends Migration
             // Indexes for performance
             $table->unique(['pdf_document_id', 'key']);
             $table->index(['key']);
-            $table->index(['pdf_document_id', 'key', 'value']);
+            $table->index(['pdf_document_id', 'key']);
         });
     }
 
